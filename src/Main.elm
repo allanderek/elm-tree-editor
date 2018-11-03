@@ -1,11 +1,13 @@
 module Main exposing (main)
 
 import Browser
+import Browser.Dom
 import Browser.Navigation as Nav
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
 import Html.Events as Events
 import List.Extra
+import Task
 import Url
 
 
@@ -88,6 +90,8 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
     | EditorAction EditorAction
+    | LeafInput String
+    | NoOp
 
 
 type EditorAction
@@ -100,28 +104,68 @@ type EditorAction
     | InsertDown Tree
 
 
+leafBoxId : String
+leafBoxId =
+    "leaf-box"
+
+
+focusLeafBox : Cmd Msg
+focusLeafBox =
+    Task.attempt (always NoOp) (Browser.Dom.focus leafBoxId)
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         LinkClicked urlRequest ->
-            case urlRequest of
-                Browser.Internal url ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+            let
+                command =
+                    case urlRequest of
+                        Browser.Internal url ->
+                            Nav.pushUrl model.key <| Url.toString url
 
-                Browser.External href ->
-                    ( model, Nav.load href )
+                        Browser.External href ->
+                            Nav.load href
+            in
+            ( model, command )
 
         UrlChanged url ->
-            ( { model | url = url }
-            , Cmd.none
-            )
+            withCommands { model | url = url } []
+
+        NoOp ->
+            withCommands model []
 
         EditorAction action ->
             let
                 newModel =
                     { model | location = updateLocation action model.location }
+
+                command =
+                    case newModel.location of
+                        ( Leaf _, _ ) ->
+                            focusLeafBox
+
+                        _ ->
+                            Cmd.none
             in
-            ( newModel, Cmd.none )
+            ( newModel, command )
+
+        LeafInput content ->
+            let
+                newModel =
+                    case model.location of
+                        ( Leaf s, path ) ->
+                            { model | location = ( Leaf content, path ) }
+
+                        _ ->
+                            model
+            in
+            withCommands newModel []
+
+
+withCommands : model -> List (Cmd msg) -> ( model, Cmd msg )
+withCommands model commands =
+    ( model, Cmd.batch commands )
 
 
 updateLocation : EditorAction -> Location -> Location
@@ -335,13 +379,24 @@ viewPath viewed path =
             viewPath child up
 
 
-viewHighlighted : Html msg -> Html msg
-viewHighlighted content =
-    div
-        [ Attributes.class "highlighted" ]
-        [ content ]
+viewHighlighted : Tree -> Html Msg
+viewHighlighted tree =
+    case tree of
+        Leaf s ->
+            Html.input
+                [ Attributes.class "leaf-input"
+                , Attributes.id leafBoxId
+                , Events.onInput LeafInput
+                , Attributes.value s
+                ]
+                []
+
+        Section _ _ ->
+            div
+                [ Attributes.class "highlighted" ]
+                [ viewTree tree ]
 
 
-viewLocation : Location -> Html msg
+viewLocation : Location -> Html Msg
 viewLocation ( expr, path ) =
-    viewPath (viewHighlighted <| viewTree expr) path
+    viewPath (viewHighlighted expr) path
