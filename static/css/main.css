@@ -1,0 +1,24 @@
+:root {
+  /* colors */
+  --dodger-blue: #45b0f9;
+  --gray: gray;
+  --scorpion: #5d5c5c;
+  --white: #ffffff;
+  --manatee: #eaeaea;
+  --black: #000000;
+  --shark: #1E2428;
+  --porcelain: #f3f4f5;
+  --abbey: #555a5e;
+  --jumbo: #6E727C;
+  --mantis: #55C350;
+  --alizarin-crimson: #EA212E;
+  --bombay: #acacae;
+  --oslo-gray: #888C96;
+  --font-regular: "Fira Sans Regular", sans-serif;
+  --font-bold: "Fira Sans Bold", sans-serif;
+}
+
+
+.highlighted{
+    border: 1px solid var(--dodger-blue);
+}
