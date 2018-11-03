@@ -2,10 +2,12 @@ module Main exposing (main)
 
 import Browser
 import Browser.Dom
+import Browser.Events
 import Browser.Navigation as Nav
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
 import Html.Events as Events
+import Json.Decode as Decode
 import List.Extra
 import Task
 import Url
@@ -25,7 +27,44 @@ main =
 
 subscriptions : Model -> Sub Msg
 subscriptions =
-    always Sub.none
+    always keySubscription
+
+
+keySubscription : Sub Msg
+keySubscription =
+    let
+        keyDecoder : Decode.Decoder Msg
+        keyDecoder =
+            let
+                toMsg k =
+                    case keyToEditorAction k of
+                        Nothing ->
+                            NoOp
+
+                        Just e ->
+                            EditorAction e
+            in
+            Decode.map toMsg <| Decode.field "key" Decode.string
+
+        keyToEditorAction : String -> Maybe EditorAction
+        keyToEditorAction string =
+            case string of
+                "ArrowLeft" ->
+                    Just MoveLeft
+
+                "ArrowRight" ->
+                    Just MoveRight
+
+                "ArrowUp" ->
+                    Just MoveUp
+
+                "ArrowDown" ->
+                    Just MoveDown
+
+                _ ->
+                    Nothing
+    in
+    Browser.Events.onKeyPress keyDecoder
 
 
 type alias ProgramFlags =
