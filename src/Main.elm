@@ -312,6 +312,16 @@ themeColor2 =
     Element.rgb255 34 91 120
 
 
+themeColor3 : Element.Color
+themeColor3 =
+    Element.rgb255 240 142 89
+
+
+themeColor4 : Element.Color
+themeColor4 =
+    Element.rgb255 125 53 26
+
+
 header : Location -> Element Msg
 header ( expr, path ) =
     let
@@ -365,6 +375,11 @@ header ( expr, path ) =
         ]
 
 
+indentElement : Element.Attr decorative msg
+indentElement =
+    Element.moveRight 10
+
+
 viewKind : TreeKind -> List (Element msg) -> Element msg
 viewKind kind viewed =
     let
@@ -378,11 +393,11 @@ viewKind kind viewed =
             Element.column
                 [ classAttribute "declaration" ]
                 [ Element.row
-                    []
-                    [ el [ classAttribute "pattern" ] pattern
+                    [ Element.spacing 8 ]
+                    [ el [ Element.width Element.fill ] pattern
                     , viewPunctuation "="
                     ]
-                , expr
+                , el [ indentElement ] expr
                 ]
 
         ( Let, children ) ->
@@ -398,7 +413,9 @@ viewKind kind viewed =
                         [ classAttribute "let" ]
                         [ viewKeyword "let"
                         , Element.column
-                            [ classAttribute "declarations" ]
+                            [ Element.spacing 10
+                            , indentElement
+                            ]
                             decls
                         , viewKeyword "in"
                         , el
@@ -408,7 +425,7 @@ viewKind kind viewed =
 
         ( Appl, children ) ->
             Element.row
-                [ classAttribute "application" ]
+                [ Element.spacing 8 ]
                 children
 
         ( _, children ) ->
@@ -418,14 +435,16 @@ viewKind kind viewed =
 viewKeyword : String -> Element msg
 viewKeyword word =
     el
-        [ classAttribute "keyword" ]
+        [ Font.color themeColor1 ]
         (text word)
 
 
 viewPunctuation : String -> Element msg
 viewPunctuation symbol =
     el
-        [ classAttribute "punctuation" ]
+        [ Font.color themeColor3
+        , Element.padding 3
+        ]
         (text symbol)
 
 
@@ -466,6 +485,7 @@ viewHighlighted tree =
             Input.text
                 [ classAttribute "leaf-input"
                 , idAttribute leafBoxId
+                , Element.width Element.fill
                 ]
                 { onChange = LeafInput
                 , text = s
@@ -475,7 +495,9 @@ viewHighlighted tree =
 
         Section _ _ ->
             el
-                [ classAttribute "highlighted" ]
+                [ Border.width 2
+                , Border.color themeColor2
+                ]
                 (viewTree tree)
 
 
