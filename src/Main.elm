@@ -4,9 +4,13 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
-import Html exposing (Html, div, text)
+import Element exposing (Element, el, text)
+import Element.Background as Background
+import Element.Border as Border
+import Element.Events as Events
+import Element.Font as Font
+import Element.Input as Input
 import Html.Attributes as Attributes
-import Html.Events as Events
 import Json.Decode as Decode
 import List.Extra
 import Task
@@ -282,30 +286,49 @@ updateLocation action location =
 
 view : Model -> Browser.Document Msg
 view model =
+    let
+        body =
+            Element.column
+                [ Element.width Element.fill
+                , Element.spacing 10
+                , Element.padding 10
+                ]
+                [ header model.location
+                , viewLocation model.location
+                ]
+    in
     { title = "Tree source editing with Elm"
-    , body =
-        [ header model.location
-        , viewLocation model.location
-        ]
+    , body = [ Element.layout [] body ]
     }
 
 
-header : Location -> Html Msg
+themeColor1 : Element.Color
+themeColor1 =
+    Element.rgb255 104 175 195
+
+
+themeColor2 : Element.Color
+themeColor2 =
+    Element.rgb255 34 91 120
+
+
+header : Location -> Element Msg
 header ( expr, path ) =
     let
-        button title msg =
-            Html.button
-                [ Attributes.class "control"
-                , Events.onClick msg
+        button title mMsg =
+            Input.button
+                [ Background.color themeColor1
+                , Border.color themeColor2
+                , Border.width 1
+                , Element.padding 5
+                , Border.rounded 5
                 ]
-                [ text title ]
+                { onPress = mMsg
+                , label = text title
+                }
 
-        disabledButton title =
-            Html.button
-                [ Attributes.class "control"
-                , Attributes.disabled True
-                ]
-                [ text title ]
+        action =
+            Just << EditorAction
 
         insertLeft =
             let
@@ -313,14 +336,14 @@ header ( expr, path ) =
                     "InsertLeft"
 
                 insert e =
-                    button title <| EditorAction <| InsertLeft e
+                    button title <| action <| InsertLeft e
             in
             case path of
                 Top ->
-                    disabledButton title
+                    button title Nothing
 
                 Node Decl _ _ _ ->
-                    disabledButton title
+                    button title Nothing
 
                 Node Appl _ _ _ ->
                     insert <| Leaf "e"
@@ -328,36 +351,37 @@ header ( expr, path ) =
                 Node Let _ _ _ ->
                     insert <| Section Decl [ Leaf "c", Leaf "3" ]
     in
-    div
-        [ Attributes.class "controls" ]
-        [ button "Up" <| EditorAction MoveUp
-        , button "Left" <| EditorAction MoveLeft
-        , button "Right" <| EditorAction MoveRight
-        , button "Down" <| EditorAction MoveDown
+    Element.wrappedRow
+        [ Element.width Element.fill
+        , Element.spaceEvenly
+        ]
+        [ button "Up" <| action MoveUp
+        , button "Left" <| action MoveLeft
+        , button "Right" <| action MoveRight
+        , button "Down" <| action MoveDown
         , insertLeft
-        , button "InsertRight" <| EditorAction <| InsertRight (Leaf "e")
-        , button "InsertDown" <| EditorAction <| InsertDown (Leaf "e")
+        , button "InsertRight" <| action <| InsertRight (Leaf "e")
+        , button "InsertDown" <| action <| InsertDown (Leaf "e")
         ]
 
 
-viewKind : TreeKind -> List (Html msg) -> Html msg
+viewKind : TreeKind -> List (Element msg) -> Element msg
 viewKind kind viewed =
     let
         viewInvalid children =
-            div
-                [ Attributes.class "invalid-expression" ]
-                [ text "Invalid expression"
-                , div [] children
-                ]
+            Element.column
+                [ classAttribute "invalid-expression" ]
+                (text "Invalid expression" :: children)
     in
     case ( kind, viewed ) of
         ( Decl, [ pattern, expr ] ) ->
-            div
-                [ Attributes.class "declaration" ]
-                [ div
-                    [ Attributes.class "pattern" ]
-                    [ pattern ]
-                , text " = "
+            Element.column
+                [ classAttribute "declaration" ]
+                [ Element.row
+                    []
+                    [ el [ classAttribute "pattern" ] pattern
+                    , viewPunctuation "="
+                    ]
                 , expr
                 ]
 
@@ -366,29 +390,46 @@ viewKind kind viewed =
                 Nothing ->
                     viewInvalid children
 
+                Just ( _, [] ) ->
+                    viewInvalid children
+
                 Just ( last, decls ) ->
-                    div
-                        [ Attributes.class "let" ]
-                        [ text "let"
-                        , div
-                            [ Attributes.class "declarations" ]
+                    Element.column
+                        [ classAttribute "let" ]
+                        [ viewKeyword "let"
+                        , Element.column
+                            [ classAttribute "declarations" ]
                             decls
-                        , text "in"
-                        , div
-                            [ Attributes.class "let-payload" ]
-                            [ last ]
+                        , viewKeyword "in"
+                        , el
+                            [ classAttribute "let-payload" ]
+                            last
                         ]
 
         ( Appl, children ) ->
-            div
-                [ Attributes.class "application" ]
+            Element.row
+                [ classAttribute "application" ]
                 children
 
         ( _, children ) ->
             viewInvalid children
 
 
-viewTree : Tree -> Html msg
+viewKeyword : String -> Element msg
+viewKeyword word =
+    el
+        [ classAttribute "keyword" ]
+        (text word)
+
+
+viewPunctuation : String -> Element msg
+viewPunctuation symbol =
+    el
+        [ classAttribute "punctuation" ]
+        (text symbol)
+
+
+viewTree : Tree -> Element msg
 viewTree tree =
     case tree of
         Leaf s ->
@@ -398,13 +439,13 @@ viewTree tree =
             viewKind kind <| List.map viewTree children
 
 
-viewPath : Html msg -> Path -> Html msg
+viewPath : Element msg -> Path -> Element msg
 viewPath viewed path =
     case path of
         Top ->
-            div
-                [ Attributes.class "top" ]
-                [ viewed ]
+            el
+                [ classAttribute "top" ]
+                viewed
 
         Node kind left up right ->
             let
@@ -418,24 +459,36 @@ viewPath viewed path =
             viewPath child up
 
 
-viewHighlighted : Tree -> Html Msg
+viewHighlighted : Tree -> Element Msg
 viewHighlighted tree =
     case tree of
         Leaf s ->
-            Html.input
-                [ Attributes.class "leaf-input"
-                , Attributes.id leafBoxId
-                , Events.onInput LeafInput
-                , Attributes.value s
+            Input.text
+                [ classAttribute "leaf-input"
+                , idAttribute leafBoxId
                 ]
-                []
+                { onChange = LeafInput
+                , text = s
+                , placeholder = Nothing
+                , label = Input.labelHidden ""
+                }
 
         Section _ _ ->
-            div
-                [ Attributes.class "highlighted" ]
-                [ viewTree tree ]
+            el
+                [ classAttribute "highlighted" ]
+                (viewTree tree)
 
 
-viewLocation : Location -> Html Msg
+viewLocation : Location -> Element Msg
 viewLocation ( expr, path ) =
     viewPath (viewHighlighted expr) path
+
+
+idAttribute : String -> Element.Attribute msg
+idAttribute s =
+    Element.htmlAttribute <| Attributes.id s
+
+
+classAttribute : String -> Element.Attribute msg
+classAttribute s =
+    Element.htmlAttribute <| Attributes.class s
