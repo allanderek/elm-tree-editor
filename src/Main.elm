@@ -144,7 +144,6 @@ type EditorAction
     | MoveDown
     | InsertLeft Tree
     | InsertRight Tree
-    | InsertDown Tree
 
 
 leafBoxId : String
@@ -272,16 +271,11 @@ updateLocation action location =
                 ( _, Top ) ->
                     location
 
-                ( expr, Node kind left up right ) ->
-                    ( expr, Node kind left up (tree :: right) )
-
-        InsertDown tree ->
-            case location of
-                ( Leaf _, _ ) ->
+                ( _, Node Let _ _ [] ) ->
                     location
 
-                ( Section kind children, path ) ->
-                    ( Section kind (tree :: children), path )
+                ( expr, Node kind left up right ) ->
+                    ( expr, Node kind left up (tree :: right) )
 
 
 view : Model -> Browser.Document Msg
@@ -326,12 +320,22 @@ header : Location -> Element Msg
 header ( expr, path ) =
     let
         button title mMsg =
+            let
+                opacity =
+                    case mMsg == Nothing of
+                        True ->
+                            0.4
+
+                        False ->
+                            1.0
+            in
             Input.button
                 [ Background.color themeColor1
                 , Border.color themeColor2
                 , Border.width 1
                 , Element.padding 5
                 , Border.rounded 5
+                , Element.alpha opacity
                 ]
                 { onPress = mMsg
                 , label = text title
@@ -339,6 +343,63 @@ header ( expr, path ) =
 
         action =
             Just << EditorAction
+
+        moveUp =
+            let
+                title =
+                    "up"
+            in
+            case path of
+                Top ->
+                    button title Nothing
+
+                Node _ _ _ _ ->
+                    button title <| action MoveUp
+
+        moveDown =
+            let
+                title =
+                    "Down"
+            in
+            case expr of
+                Leaf _ ->
+                    button title Nothing
+
+                Section _ [] ->
+                    button title Nothing
+
+                Section _ _ ->
+                    button title <| action MoveDown
+
+        moveLeft =
+            let
+                title =
+                    "Left"
+            in
+            case path of
+                Top ->
+                    button title Nothing
+
+                Node _ [] _ _ ->
+                    button title Nothing
+
+                Node _ _ _ _ ->
+                    button title <| action MoveLeft
+
+        moveRight =
+            let
+                title =
+                    "Right"
+            in
+            case path of
+                Top ->
+                    button title Nothing
+
+                Node _ _ _ [] ->
+                    button title Nothing
+
+                Node _ _ _ _ ->
+                    button title <| action MoveRight
 
         insertLeft =
             let
@@ -360,18 +421,41 @@ header ( expr, path ) =
 
                 Node Let _ _ _ ->
                     insert <| Section Decl [ Leaf "c", Leaf "3" ]
+
+        insertRight =
+            let
+                title =
+                    "InsertRight"
+
+                insert e =
+                    button title <| action <| InsertRight e
+            in
+            case path of
+                Top ->
+                    button title Nothing
+
+                Node Decl _ _ _ ->
+                    button title Nothing
+
+                Node Appl _ _ _ ->
+                    insert <| Leaf "e"
+
+                Node Let _ _ [] ->
+                    button title Nothing
+
+                Node Let _ _ _ ->
+                    insert <| Section Decl [ Leaf "d", Leaf "4" ]
     in
     Element.wrappedRow
         [ Element.width Element.fill
         , Element.spaceEvenly
         ]
-        [ button "Up" <| action MoveUp
-        , button "Left" <| action MoveLeft
-        , button "Right" <| action MoveRight
-        , button "Down" <| action MoveDown
+        [ moveUp
+        , moveDown
+        , moveLeft
+        , moveRight
         , insertLeft
-        , button "InsertRight" <| action <| InsertRight (Leaf "e")
-        , button "InsertDown" <| action <| InsertDown (Leaf "e")
+        , insertRight
         ]
 
 
@@ -497,6 +581,7 @@ viewHighlighted tree =
             el
                 [ Border.width 2
                 , Border.color themeColor2
+                , Element.padding 3
                 ]
                 (viewTree tree)
 
