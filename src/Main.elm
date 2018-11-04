@@ -144,6 +144,7 @@ type EditorAction
     | MoveDown
     | InsertLeft Tree
     | InsertRight Tree
+    | PromoteLet
 
 
 leafBoxId : String
@@ -276,6 +277,22 @@ updateLocation action location =
 
                 ( expr, Node kind left up right ) ->
                     ( expr, Node kind left up (tree :: right) )
+
+        PromoteLet ->
+            case location of
+                ( Section Decl _, _ ) ->
+                    location
+
+                ( Section Let _, _ ) ->
+                    location
+
+                ( expr, path ) ->
+                    ( Section Let
+                        [ Section Decl [ Leaf "a", Leaf "1" ]
+                        , expr
+                        ]
+                    , path
+                    )
 
 
 view : Model -> Browser.Document Msg
@@ -445,6 +462,21 @@ header ( expr, path ) =
 
                 Node Let _ _ _ ->
                     insert <| Section Decl [ Leaf "d", Leaf "4" ]
+
+        promoteLet =
+            let
+                title =
+                    "Let"
+            in
+            case expr of
+                Section Decl _ ->
+                    button title Nothing
+
+                Section Let _ ->
+                    button title Nothing
+
+                _ ->
+                    button title <| action PromoteLet
     in
     Element.wrappedRow
         [ Element.width Element.fill
@@ -456,6 +488,7 @@ header ( expr, path ) =
         , moveRight
         , insertLeft
         , insertRight
+        , promoteLet
         ]
 
 
@@ -475,7 +508,7 @@ viewKind kind viewed =
     case ( kind, viewed ) of
         ( Decl, [ pattern, expr ] ) ->
             Element.column
-                [ classAttribute "declaration" ]
+                [ Element.padding 10 ]
                 [ Element.row
                     [ Element.spacing 8 ]
                     [ el [ Element.width Element.fill ] pattern
@@ -580,8 +613,9 @@ viewHighlighted tree =
         Section _ _ ->
             el
                 [ Border.width 2
+                , Border.rounded 5
                 , Border.color themeColor2
-                , Element.padding 3
+                , Element.padding 10
                 ]
                 (viewTree tree)
 
