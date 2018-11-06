@@ -89,19 +89,44 @@ type alias Location =
 
 
 type Tree
+    = ExprTree Expr
+    | PatternTree Pattern
+    | DeclTree Declaration
+
+
+type Expr
     = Leaf String
-    | Apply (List Tree)
+    | Apply (List Expr)
+
+
+
+--| Let (List Declaration) Expr
+
+
+type alias Declaration =
+    { pattern : Pattern
+    , expr : Tree
+    }
+
+
+type Pattern
+    = NamePattern String
 
 
 type Path
     = Top
-    | ApplyPath (List Tree) Path (List Tree)
+    | ApplyPath (List Expr) Path (List Expr)
+
+
+
+-- | LetDecl (List Declaration) Path (List Declaration) Expr
+-- | LetExpr (List Declaration) Path
 
 
 initialLocation : Location
 initialLocation =
     { path = Top
-    , current = Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ]
+    , current = ExprTree <| Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ]
     }
 
 
@@ -176,7 +201,7 @@ update msg model =
 
                 command =
                     case newModel.location.current of
-                        Leaf _ ->
+                        ExprTree (Leaf _) ->
                             focusLeafBox
 
                         _ ->
@@ -188,13 +213,13 @@ update msg model =
             let
                 newModel =
                     case model.location.current of
-                        Leaf s ->
+                        ExprTree (Leaf s) ->
                             let
                                 location =
                                     model.location
 
                                 newLocation =
-                                    { location | current = Leaf content }
+                                    { location | current = ExprTree (Leaf content) }
                             in
                             { model | location = newLocation }
 
@@ -221,9 +246,17 @@ updateLocation action location =
                     location
 
                 ApplyPath (l :: left) path right ->
-                    { current = l
-                    , path = ApplyPath left path (location.current :: right)
-                    }
+                    case location.current of
+                        ExprTree current ->
+                            { current = ExprTree l
+                            , path = ApplyPath left path (current :: right)
+                            }
+
+                        PatternTree _ ->
+                            location
+
+                        DeclTree _ ->
+                            location
 
         MoveRight ->
             case location.path of
@@ -234,9 +267,17 @@ updateLocation action location =
                     location
 
                 ApplyPath left path (r :: right) ->
-                    { current = r
-                    , path = ApplyPath (location.current :: left) path right
-                    }
+                    case location.current of
+                        ExprTree current ->
+                            { current = ExprTree r
+                            , path = ApplyPath (current :: left) path right
+                            }
+
+                        PatternTree _ ->
+                            location
+
+                        DeclTree _ ->
+                            location
 
         MoveUp ->
             case location.path of
@@ -244,24 +285,32 @@ updateLocation action location =
                     location
 
                 ApplyPath left path right ->
-                    let
-                        args =
-                            List.concat
-                                [ List.reverse left
-                                , [ location.current ]
-                                , right
-                                ]
-                    in
-                    { path = path
-                    , current = Apply args
-                    }
+                    case location.current of
+                        ExprTree expr ->
+                            let
+                                args =
+                                    List.concat
+                                        [ List.reverse left
+                                        , [ expr ]
+                                        , right
+                                        ]
+                            in
+                            { path = path
+                            , current = ExprTree <| Apply args
+                            }
+
+                        DeclTree _ ->
+                            location
+
+                        PatternTree _ ->
+                            location
 
         MoveDown ->
             case location.current of
-                Leaf _ ->
+                ExprTree (Leaf _) ->
                     location
 
-                Apply [] ->
+                ExprTree (Apply []) ->
                     -- Obviously this should never happen, even Apply [e] shouldn't happen
                     -- we could inforce this in the type system, eg. `Apply Tree Tree` so you're only
                     -- ever applying a function one argument and what looks like many is just a tree,
@@ -271,10 +320,16 @@ updateLocation action location =
                     -- though that we require 3 paths. ApplyFun, ApplyArg, ApplyRest
                     location
 
-                Apply (first :: rest) ->
-                    { current = first
+                ExprTree (Apply (first :: rest)) ->
+                    { current = ExprTree first
                     , path = ApplyPath [] location.path rest
                     }
+
+                DeclTree _ ->
+                    location
+
+                PatternTree _ ->
+                    location
 
         InsertLeft tree ->
             case location.path of
@@ -282,9 +337,17 @@ updateLocation action location =
                     location
 
                 ApplyPath left path right ->
-                    { current = tree
-                    , path = ApplyPath left path (location.current :: right)
-                    }
+                    case location.current of
+                        ExprTree current ->
+                            { current = tree
+                            , path = ApplyPath left path (current :: right)
+                            }
+
+                        PatternTree _ ->
+                            location
+
+                        DeclTree _ ->
+                            location
 
         InsertRight tree ->
             case location.path of
@@ -292,9 +355,17 @@ updateLocation action location =
                     location
 
                 ApplyPath left path right ->
-                    { current = tree
-                    , path = ApplyPath (location.current :: left) path right
-                    }
+                    case location.current of
+                        ExprTree current ->
+                            { current = tree
+                            , path = ApplyPath (current :: left) path right
+                            }
+
+                        PatternTree _ ->
+                            location
+
+                        DeclTree _ ->
+                            location
 
         PromoteLet ->
             location
@@ -384,14 +455,20 @@ header location =
                     "Down"
             in
             case location.current of
-                Leaf _ ->
+                ExprTree (Leaf _) ->
                     button title Nothing
 
-                Apply [] ->
+                ExprTree (Apply []) ->
                     button title Nothing
 
-                Apply (_ :: _) ->
+                ExprTree (Apply (_ :: _)) ->
                     button title <| action MoveDown
+
+                PatternTree _ ->
+                    button title Nothing
+
+                DeclTree _ ->
+                    button title Nothing
 
         moveLeft =
             let
@@ -436,7 +513,7 @@ header location =
                     button title Nothing
 
                 ApplyPath _ _ _ ->
-                    insert <| Leaf "l"
+                    insert <| ExprTree (Leaf "l")
 
         insertRight =
             let
@@ -451,7 +528,7 @@ header location =
                     button title Nothing
 
                 ApplyPath _ _ _ ->
-                    insert <| Leaf "r"
+                    insert <| ExprTree (Leaf "r")
 
         promoteLet =
             let
@@ -553,11 +630,24 @@ viewPunctuation symbol =
 viewTree : Tree -> Element msg
 viewTree tree =
     case tree of
+        ExprTree expr ->
+            viewExpr expr
+
+        DeclTree _ ->
+            text "Not done decls yet."
+
+        PatternTree _ ->
+            text "Not done patterns yet"
+
+
+viewExpr : Expr -> Element msg
+viewExpr expr =
+    case expr of
         Leaf s ->
             text s
 
         Apply children ->
-            viewApply <| List.map viewTree children
+            viewApply <| List.map viewExpr children
 
 
 viewApply : List (Element msg) -> Element msg
@@ -577,8 +667,8 @@ viewPath viewed path =
         ApplyPath left up right ->
             let
                 children =
-                    (List.reverse <| List.map viewTree left)
-                        ++ (viewed :: List.map viewTree right)
+                    (List.reverse <| List.map viewExpr left)
+                        ++ (viewed :: List.map viewExpr right)
 
                 child =
                     viewApply children
@@ -589,7 +679,7 @@ viewPath viewed path =
 viewHighlighted : Tree -> Element Msg
 viewHighlighted tree =
     case tree of
-        Leaf s ->
+        ExprTree (Leaf s) ->
             Input.text
                 [ classAttribute "leaf-input"
                 , idAttribute leafBoxId
@@ -601,7 +691,7 @@ viewHighlighted tree =
                 , label = Input.labelHidden ""
                 }
 
-        Apply _ ->
+        _ ->
             el
                 [ Border.width 2
                 , Border.rounded 5
