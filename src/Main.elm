@@ -83,35 +83,26 @@ type alias Model =
 
 
 type alias Location =
-    ( Tree, Path )
+    { current : Tree
+    , path : Path
+    }
 
 
 type Tree
     = Leaf String
-    | Section TreeKind (List Tree)
-
-
-type TreeKind
-    = Let
-    | Decl
-    | Appl
+    | Apply (List Tree)
 
 
 type Path
     = Top
-    | Node TreeKind (List Tree) Path (List Tree)
+    | ApplyPath (List Tree) Path (List Tree)
 
 
 initialLocation : Location
 initialLocation =
-    ( Section
-        Let
-        [ Section Decl [ Leaf "a", Leaf "1" ]
-        , Section Decl [ Leaf "b", Leaf "2" ]
-        , Section Appl [ Leaf "add", Leaf "a", Leaf "b" ]
-        ]
-    , Top
-    )
+    { path = Top
+    , current = Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ]
+    }
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -184,8 +175,8 @@ update msg model =
                     { model | location = updateLocation action model.location }
 
                 command =
-                    case newModel.location of
-                        ( Leaf _, _ ) ->
+                    case newModel.location.current of
+                        Leaf _ ->
                             focusLeafBox
 
                         _ ->
@@ -196,9 +187,16 @@ update msg model =
         LeafInput content ->
             let
                 newModel =
-                    case model.location of
-                        ( Leaf s, path ) ->
-                            { model | location = ( Leaf content, path ) }
+                    case model.location.current of
+                        Leaf s ->
+                            let
+                                location =
+                                    model.location
+
+                                newLocation =
+                                    { location | current = Leaf content }
+                            in
+                            { model | location = newLocation }
 
                         _ ->
                             model
@@ -215,84 +213,91 @@ updateLocation : EditorAction -> Location -> Location
 updateLocation action location =
     case action of
         MoveLeft ->
-            case location of
-                ( _, Top ) ->
+            case location.path of
+                Top ->
                     location
 
-                ( _, Node _ [] _ _ ) ->
+                ApplyPath [] _ _ ->
                     location
 
-                ( expr, Node kind (l :: left) up right ) ->
-                    ( l, Node kind left up (expr :: right) )
+                ApplyPath (l :: left) path right ->
+                    { current = l
+                    , path = ApplyPath left path (location.current :: right)
+                    }
 
         MoveRight ->
-            case location of
-                ( _, Top ) ->
+            case location.path of
+                Top ->
                     location
 
-                ( _, Node _ _ _ [] ) ->
+                ApplyPath _ _ [] ->
                     location
 
-                ( expr, Node kind left up (r :: right) ) ->
-                    ( r, Node kind (expr :: left) up right )
+                ApplyPath left path (r :: right) ->
+                    { current = r
+                    , path = ApplyPath (location.current :: left) path right
+                    }
 
         MoveUp ->
-            case location of
-                ( _, Top ) ->
+            case location.path of
+                Top ->
                     location
 
-                ( expr, Node kind left up right ) ->
+                ApplyPath left path right ->
                     let
-                        newExpr =
-                            Section kind <| List.reverse left ++ (expr :: right)
+                        args =
+                            List.concat
+                                [ List.reverse left
+                                , [ location.current ]
+                                , right
+                                ]
                     in
-                    ( newExpr, up )
+                    { path = path
+                    , current = Apply args
+                    }
 
         MoveDown ->
-            case location of
-                ( Leaf _, _ ) ->
+            case location.current of
+                Leaf _ ->
                     location
 
-                ( Section _ [], _ ) ->
+                Apply [] ->
+                    -- Obviously this should never happen, even Apply [e] shouldn't happen
+                    -- we could inforce this in the type system, eg. `Apply Tree Tree` so you're only
+                    -- ever applying a function one argument and what looks like many is just a tree,
+                    -- which we could then navigate cleverly. This I have to admit is tempting. Another
+                    -- possibility is Apply Tree Tree (List Tree) which makes sure you always have a function
+                    -- and at least one argument but you can have multiple. I quite like this. It does mean
+                    -- though that we require 3 paths. ApplyFun, ApplyArg, ApplyRest
                     location
 
-                ( Section kind (f :: rest), path ) ->
-                    ( f, Node kind [] path rest )
+                Apply (first :: rest) ->
+                    { current = first
+                    , path = ApplyPath [] location.path rest
+                    }
 
         InsertLeft tree ->
-            case location of
-                ( _, Top ) ->
+            case location.path of
+                Top ->
                     location
 
-                ( expr, Node kind left up right ) ->
-                    ( expr, Node kind (tree :: left) up right )
+                ApplyPath left path right ->
+                    { current = tree
+                    , path = ApplyPath left path (location.current :: right)
+                    }
 
         InsertRight tree ->
-            case location of
-                ( _, Top ) ->
+            case location.path of
+                Top ->
                     location
 
-                ( _, Node Let _ _ [] ) ->
-                    location
-
-                ( expr, Node kind left up right ) ->
-                    ( expr, Node kind left up (tree :: right) )
+                ApplyPath left path right ->
+                    { current = tree
+                    , path = ApplyPath (location.current :: left) path right
+                    }
 
         PromoteLet ->
-            case location of
-                ( Section Decl _, _ ) ->
-                    location
-
-                ( Section Let _, _ ) ->
-                    location
-
-                ( expr, path ) ->
-                    ( Section Let
-                        [ Section Decl [ Leaf "a", Leaf "1" ]
-                        , expr
-                        ]
-                    , path
-                    )
+            location
 
 
 view : Model -> Browser.Document Msg
@@ -334,7 +339,7 @@ themeColor4 =
 
 
 header : Location -> Element Msg
-header ( expr, path ) =
+header location =
     let
         button title mMsg =
             let
@@ -366,11 +371,11 @@ header ( expr, path ) =
                 title =
                     "up"
             in
-            case path of
+            case location.path of
                 Top ->
                     button title Nothing
 
-                Node _ _ _ _ ->
+                ApplyPath _ _ _ ->
                     button title <| action MoveUp
 
         moveDown =
@@ -378,14 +383,14 @@ header ( expr, path ) =
                 title =
                     "Down"
             in
-            case expr of
+            case location.current of
                 Leaf _ ->
                     button title Nothing
 
-                Section _ [] ->
+                Apply [] ->
                     button title Nothing
 
-                Section _ _ ->
+                Apply (_ :: _) ->
                     button title <| action MoveDown
 
         moveLeft =
@@ -393,14 +398,14 @@ header ( expr, path ) =
                 title =
                     "Left"
             in
-            case path of
+            case location.path of
                 Top ->
                     button title Nothing
 
-                Node _ [] _ _ ->
+                ApplyPath [] _ _ ->
                     button title Nothing
 
-                Node _ _ _ _ ->
+                ApplyPath (_ :: _) _ _ ->
                     button title <| action MoveLeft
 
         moveRight =
@@ -408,14 +413,14 @@ header ( expr, path ) =
                 title =
                     "Right"
             in
-            case path of
+            case location.path of
                 Top ->
                     button title Nothing
 
-                Node _ _ _ [] ->
+                ApplyPath _ _ [] ->
                     button title Nothing
 
-                Node _ _ _ _ ->
+                ApplyPath _ _ (_ :: _) ->
                     button title <| action MoveRight
 
         insertLeft =
@@ -426,18 +431,12 @@ header ( expr, path ) =
                 insert e =
                     button title <| action <| InsertLeft e
             in
-            case path of
+            case location.path of
                 Top ->
                     button title Nothing
 
-                Node Decl _ _ _ ->
-                    button title Nothing
-
-                Node Appl _ _ _ ->
-                    insert <| Leaf "e"
-
-                Node Let _ _ _ ->
-                    insert <| Section Decl [ Leaf "c", Leaf "3" ]
+                ApplyPath _ _ _ ->
+                    insert <| Leaf "l"
 
         insertRight =
             let
@@ -447,36 +446,19 @@ header ( expr, path ) =
                 insert e =
                     button title <| action <| InsertRight e
             in
-            case path of
+            case location.path of
                 Top ->
                     button title Nothing
 
-                Node Decl _ _ _ ->
-                    button title Nothing
-
-                Node Appl _ _ _ ->
-                    insert <| Leaf "e"
-
-                Node Let _ _ [] ->
-                    button title Nothing
-
-                Node Let _ _ _ ->
-                    insert <| Section Decl [ Leaf "d", Leaf "4" ]
+                ApplyPath _ _ _ ->
+                    insert <| Leaf "r"
 
         promoteLet =
             let
                 title =
                     "Let"
             in
-            case expr of
-                Section Decl _ ->
-                    button title Nothing
-
-                Section Let _ ->
-                    button title Nothing
-
-                _ ->
-                    button title <| action PromoteLet
+            button title Nothing
     in
     Element.wrappedRow
         [ Element.width Element.fill
@@ -497,56 +479,59 @@ indentElement =
     Element.moveRight 10
 
 
-viewKind : TreeKind -> List (Element msg) -> Element msg
-viewKind kind viewed =
-    let
-        viewInvalid children =
-            Element.column
-                [ classAttribute "invalid-expression" ]
-                (text "Invalid expression" :: children)
-    in
-    case ( kind, viewed ) of
-        ( Decl, [ pattern, expr ] ) ->
-            Element.column
-                [ Element.padding 10 ]
-                [ Element.row
-                    [ Element.spacing 8 ]
-                    [ el [ Element.width Element.fill ] pattern
-                    , viewPunctuation "="
-                    ]
-                , el [ indentElement ] expr
-                ]
 
-        ( Let, children ) ->
-            case List.Extra.unconsLast children of
-                Nothing ->
-                    viewInvalid children
+{- }
+   viewKind : TreeKind -> List (Element msg) -> Element msg
+   viewKind kind viewed =
+       let
+           viewInvalid children =
+               Element.column
+                   [ classAttribute "invalid-expression" ]
+                   (text "Invalid expression" :: children)
+       in
+       case ( kind, viewed ) of
+           ( Decl, [ pattern, expr ] ) ->
+               Element.column
+                   [ Element.padding 10 ]
+                   [ Element.row
+                       [ Element.spacing 8 ]
+                       [ el [ Element.width Element.fill ] pattern
+                       , viewPunctuation "="
+                       ]
+                   , el [ indentElement ] expr
+                   ]
 
-                Just ( _, [] ) ->
-                    viewInvalid children
+           ( Let, children ) ->
+               case List.Extra.unconsLast children of
+                   Nothing ->
+                       viewInvalid children
 
-                Just ( last, decls ) ->
-                    Element.column
-                        [ classAttribute "let" ]
-                        [ viewKeyword "let"
-                        , Element.column
-                            [ Element.spacing 10
-                            , indentElement
-                            ]
-                            decls
-                        , viewKeyword "in"
-                        , el
-                            [ classAttribute "let-payload" ]
-                            last
-                        ]
+                   Just ( _, [] ) ->
+                       viewInvalid children
 
-        ( Appl, children ) ->
-            Element.row
-                [ Element.spacing 8 ]
-                children
+                   Just ( last, decls ) ->
+                       Element.column
+                           [ classAttribute "let" ]
+                           [ viewKeyword "let"
+                           , Element.column
+                               [ Element.spacing 10
+                               , indentElement
+                               ]
+                               decls
+                           , viewKeyword "in"
+                           , el
+                               [ classAttribute "let-payload" ]
+                               last
+                           ]
 
-        ( _, children ) ->
-            viewInvalid children
+           ( Appl, children ) ->
+               Element.row
+                   [ Element.spacing 8 ]
+                   children
+
+           ( _, children ) ->
+               viewInvalid children
+-}
 
 
 viewKeyword : String -> Element msg
@@ -571,8 +556,14 @@ viewTree tree =
         Leaf s ->
             text s
 
-        Section kind children ->
-            viewKind kind <| List.map viewTree children
+        Apply children ->
+            viewApply <| List.map viewTree children
+
+
+viewApply : List (Element msg) -> Element msg
+viewApply =
+    Element.wrappedRow
+        [ Element.spacing 4 ]
 
 
 viewPath : Element msg -> Path -> Element msg
@@ -583,14 +574,14 @@ viewPath viewed path =
                 [ classAttribute "top" ]
                 viewed
 
-        Node kind left up right ->
+        ApplyPath left up right ->
             let
                 children =
                     (List.reverse <| List.map viewTree left)
                         ++ (viewed :: List.map viewTree right)
 
                 child =
-                    viewKind kind children
+                    viewApply children
             in
             viewPath child up
 
@@ -602,7 +593,7 @@ viewHighlighted tree =
             Input.text
                 [ classAttribute "leaf-input"
                 , idAttribute leafBoxId
-                , Element.width Element.fill
+                , Element.width Element.shrink
                 ]
                 { onChange = LeafInput
                 , text = s
@@ -610,7 +601,7 @@ viewHighlighted tree =
                 , label = Input.labelHidden ""
                 }
 
-        Section _ _ ->
+        Apply _ ->
             el
                 [ Border.width 2
                 , Border.rounded 5
@@ -621,8 +612,8 @@ viewHighlighted tree =
 
 
 viewLocation : Location -> Element Msg
-viewLocation ( expr, path ) =
-    viewPath (viewHighlighted expr) path
+viewLocation location =
+    viewPath (viewHighlighted location.current) location.path
 
 
 idAttribute : String -> Element.Attribute msg
