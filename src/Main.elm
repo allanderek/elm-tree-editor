@@ -759,7 +759,7 @@ header location =
                             action <| InsertRight <| ExprTree (Leaf "r")
 
                         LetDecl _ _ _ _ ->
-                            action <| InsertLeft <| DeclTree { pattern = NamePattern "_", expr = Leaf "e" }
+                            action <| InsertRight <| DeclTree { pattern = NamePattern "_", expr = Leaf "e" }
 
                         LetExpr _ _ ->
                             Nothing
