@@ -82,18 +82,6 @@ type alias Model =
     }
 
 
-type alias Location =
-    { current : Tree
-    , path : Path
-    }
-
-
-type Tree
-    = ExprTree Expr
-    | PatternTree Pattern
-    | DeclTree Declaration
-
-
 type Expr
     = Leaf String
     | Apply (List Expr)
@@ -110,27 +98,40 @@ type Pattern
     = NamePattern String
 
 
-type Path
+type ExprPath
     = Top
-    | ApplyPath (List Expr) Path (List Expr)
-    | LetDecl (List Declaration) Path (List Declaration) Expr
-    | LetExpr (List Declaration) Path
+    | ApplyPath (List Expr) ExprPath (List Expr)
+    | LetExpr (List Declaration) ExprPath
+    | DeclExpr Pattern DeclPath
+
+
+type DeclPath
+    = LetDecl (List Declaration) ExprPath (List Declaration) Expr
+
+
+type PatternPath
+    = DeclPattern DeclPath Expr
+
+
+type Location
+    = ExprLocation Expr ExprPath
+    | DeclLocation Declaration DeclPath
+    | PatternLocation Pattern PatternPath
 
 
 initialLocation : Location
 initialLocation =
-    { path = Top
-    , current =
-        ExprTree
-            (Let
+    let
+        expr =
+            Let
                 [ { pattern = NamePattern "a", expr = Leaf "1" }
                 , { pattern = NamePattern "b", expr = Leaf "2" }
                 , { pattern = NamePattern "c", expr = Leaf "3" }
                 , { pattern = NamePattern "d", expr = Leaf "4" }
                 ]
                 (Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ])
-            )
-    }
+    in
+    ExprLocation expr Top
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -161,8 +162,8 @@ type EditorAction
     | MoveRight
     | MoveUp
     | MoveDown
-    | InsertLeft Tree
-    | InsertRight Tree
+    | InsertLeft
+    | InsertRight
     | PromoteLet
 
 
@@ -203,8 +204,11 @@ update msg model =
                     { model | location = updateLocation action model.location }
 
                 command =
-                    case newModel.location.current of
-                        ExprTree (Leaf _) ->
+                    case newModel.location of
+                        ExprLocation (Leaf _) _ ->
+                            focusLeafBox
+
+                        PatternLocation (NamePattern _) _ ->
                             focusLeafBox
 
                         _ ->
@@ -215,14 +219,18 @@ update msg model =
         LeafInput content ->
             let
                 newModel =
-                    case model.location.current of
-                        ExprTree (Leaf s) ->
+                    case model.location of
+                        ExprLocation (Leaf _) path ->
                             let
-                                location =
-                                    model.location
-
                                 newLocation =
-                                    { location | current = ExprTree (Leaf content) }
+                                    ExprLocation (Leaf content) path
+                            in
+                            { model | location = newLocation }
+
+                        PatternLocation (NamePattern _) path ->
+                            let
+                                newLocation =
+                                    PatternLocation (NamePattern content) path
                             in
                             { model | location = newLocation }
 
@@ -241,322 +249,270 @@ updateLocation : EditorAction -> Location -> Location
 updateLocation action location =
     case action of
         MoveLeft ->
-            case location.path of
-                Top ->
+            case location of
+                ExprLocation expr path ->
+                    case path of
+                        Top ->
+                            location
+
+                        ApplyPath [] _ _ ->
+                            location
+
+                        ApplyPath (l :: left) up right ->
+                            ExprLocation l <| ApplyPath left up (expr :: right)
+
+                        LetExpr [] _ ->
+                            location
+
+                        LetExpr (l :: left) up ->
+                            DeclLocation l <| LetDecl left up [] expr
+
+                        DeclExpr pattern up ->
+                            PatternLocation pattern <| DeclPattern up expr
+
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl [] _ _ _ ->
+                            location
+
+                        LetDecl (l :: left) up right expr ->
+                            DeclLocation l <| LetDecl left up (declaration :: right) expr
+
+                PatternLocation pattern path ->
                     location
-
-                ApplyPath [] _ _ ->
-                    location
-
-                ApplyPath (l :: left) path right ->
-                    case location.current of
-                        ExprTree current ->
-                            { current = ExprTree l
-                            , path = ApplyPath left path (current :: right)
-                            }
-
-                        PatternTree _ ->
-                            location
-
-                        DeclTree _ ->
-                            location
-
-                LetDecl [] _ _ _ ->
-                    location
-
-                LetDecl (l :: left) path right expr ->
-                    case location.current of
-                        DeclTree d ->
-                            { current = DeclTree l
-                            , path = LetDecl left path (d :: right) expr
-                            }
-
-                        PatternTree _ ->
-                            location
-
-                        ExprTree _ ->
-                            location
-
-                LetExpr [] _ ->
-                    location
-
-                LetExpr (d :: declarations) path ->
-                    case location.current of
-                        ExprTree current ->
-                            { current = DeclTree d
-                            , path = LetDecl declarations path [] current
-                            }
-
-                        DeclTree _ ->
-                            location
-
-                        PatternTree _ ->
-                            location
 
         MoveRight ->
-            case location.path of
-                Top ->
-                    location
+            case location of
+                PatternLocation pattern path ->
+                    case path of
+                        DeclPattern up expr ->
+                            ExprLocation expr <| DeclExpr pattern up
 
-                ApplyPath _ _ [] ->
-                    location
-
-                ApplyPath left path (r :: right) ->
-                    case location.current of
-                        ExprTree current ->
-                            { current = ExprTree r
-                            , path = ApplyPath (current :: left) path right
-                            }
-
-                        PatternTree _ ->
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl _ _ [] _ ->
                             location
 
-                        DeclTree _ ->
+                        LetDecl left up (r :: right) expr ->
+                            DeclLocation r <| LetDecl (declaration :: left) up right expr
+
+                ExprLocation expr path ->
+                    case path of
+                        Top ->
                             location
 
-                LetDecl left path [] expr ->
-                    case location.current of
-                        DeclTree d ->
-                            { current = ExprTree expr
-                            , path = LetExpr (d :: left) path
-                            }
-
-                        ExprTree _ ->
+                        ApplyPath _ _ [] ->
                             location
 
-                        PatternTree _ ->
+                        ApplyPath left up (r :: right) ->
+                            ExprLocation r <| ApplyPath (expr :: left) up right
+
+                        LetExpr _ _ ->
                             location
 
-                LetDecl left path (r :: right) expr ->
-                    case location.current of
-                        DeclTree d ->
-                            { current = DeclTree r
-                            , path = LetDecl (d :: left) path right expr
-                            }
-
-                        PatternTree _ ->
+                        DeclExpr _ _ ->
                             location
-
-                        ExprTree _ ->
-                            location
-
-                LetExpr _ _ ->
-                    location
 
         MoveUp ->
-            case location.path of
-                Top ->
-                    location
-
-                ApplyPath left path right ->
-                    case location.current of
-                        ExprTree expr ->
+            case location of
+                PatternLocation pattern path ->
+                    case path of
+                        DeclPattern up expr ->
                             let
-                                args =
-                                    List.concat
-                                        [ List.reverse left
-                                        , [ expr ]
-                                        , right
-                                        ]
+                                declaration =
+                                    { pattern = pattern
+                                    , expr = expr
+                                    }
                             in
-                            { path = path
-                            , current = ExprTree <| Apply args
-                            }
+                            DeclLocation declaration up
 
-                        DeclTree _ ->
-                            location
-
-                        PatternTree _ ->
-                            location
-
-                LetDecl left path right expr ->
-                    case location.current of
-                        DeclTree d ->
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl left up right inExpr ->
                             let
                                 declarations =
-                                    List.reverse left ++ (d :: right)
+                                    upList left declaration right
+
+                                expr =
+                                    Let declarations inExpr
                             in
-                            { current = ExprTree <| Let declarations expr
-                            , path = path
-                            }
+                            ExprLocation expr up
 
-                        PatternTree _ ->
+                ExprLocation expr path ->
+                    case path of
+                        Top ->
                             location
 
-                        ExprTree _ ->
-                            location
+                        ApplyPath left up right ->
+                            let
+                                args =
+                                    upList left expr right
+                            in
+                            ExprLocation (Apply args) up
 
-                LetExpr declarations path ->
-                    case location.current of
-                        ExprTree e ->
-                            { current = ExprTree <| Let declarations e
-                            , path = path
-                            }
+                        LetExpr declarations up ->
+                            let
+                                letExpr =
+                                    Let (List.reverse declarations) expr
+                            in
+                            ExprLocation letExpr up
 
-                        PatternTree _ ->
-                            location
-
-                        DeclTree _ ->
-                            location
+                        DeclExpr pattern up ->
+                            let
+                                declaration =
+                                    { pattern = pattern
+                                    , expr = expr
+                                    }
+                            in
+                            DeclLocation declaration up
 
         MoveDown ->
-            case location.current of
-                ExprTree (Leaf _) ->
+            case location of
+                PatternLocation pattern up ->
+                    case pattern of
+                        NamePattern _ ->
+                            location
+
+                DeclLocation declaration up ->
+                    -- Note this is a break from convention we're going into the expression
+                    -- which is kind of not the first child of the declaration, but my argument is
+                    -- that often you will wish to modify the expression in a declaration without
+                    -- modifying the name.
+                    ExprLocation declaration.expr <| DeclExpr declaration.pattern up
+
+                ExprLocation expr up ->
+                    case expr of
+                        Leaf _ ->
+                            location
+
+                        Apply [] ->
+                            location
+
+                        Apply (first :: rest) ->
+                            ExprLocation first <| ApplyPath [] up rest
+
+                        Let [] inExpr ->
+                            -- This should not happen but I guess it's kind of possible if someone is deleting declarations
+                            -- the question is whether, when someone deletes the last declaration we just coalasce the expression or not.
+                            -- We could actually just do this regardless of how many declarations there are. I suspect at some point I might
+                            -- have MoveDownLeft and MoveDownRight.
+                            ExprLocation inExpr <| LetExpr [] up
+
+                        Let (first :: rest) inExpr ->
+                            DeclLocation first <| LetDecl [] up rest inExpr
+
+        InsertLeft ->
+            case location of
+                PatternLocation _ _ ->
                     location
 
-                ExprTree (Apply []) ->
-                    -- Obviously this should never happen, even Apply [e] shouldn't happen
-                    -- we could inforce this in the type system, eg. `Apply Tree Tree` so you're only
-                    -- ever applying a function one argument and what looks like many is just a tree,
-                    -- which we could then navigate cleverly. This I have to admit is tempting. Another
-                    -- possibility is Apply Tree Tree (List Tree) which makes sure you always have a function
-                    -- and at least one argument but you can have multiple. I quite like this. It does mean
-                    -- though that we require 3 paths. ApplyFun, ApplyArg, ApplyRest
-                    location
-
-                ExprTree (Apply (first :: rest)) ->
-                    { current = ExprTree first
-                    , path = ApplyPath [] location.path rest
-                    }
-
-                ExprTree (Let [] expr) ->
-                    -- Another one that should not ever happen, but my guess is it could
-                    -- in any case it's relatively easy to move down into the expression.
-                    { current = ExprTree expr
-                    , path = LetExpr [] location.path
-                    }
-
-                ExprTree (Let (d :: declarations) expr) ->
-                    { current = DeclTree d
-                    , path = LetDecl [] location.path declarations expr
-                    }
-
-                DeclTree _ ->
-                    location
-
-                PatternTree (NamePattern _) ->
-                    location
-
-        InsertLeft tree ->
-            case location.path of
-                Top ->
-                    location
-
-                ApplyPath left path right ->
-                    case location.current of
-                        ExprTree current ->
-                            case tree of
-                                ExprTree _ ->
-                                    { current = tree
-                                    , path = ApplyPath left path (current :: right)
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl left up right inExpr ->
+                            let
+                                newDeclaration =
+                                    { pattern = NamePattern "l"
+                                    , expr = Leaf "1"
                                     }
+                            in
+                            DeclLocation newDeclaration <|
+                                LetDecl left up (declaration :: right) inExpr
 
-                                DeclTree _ ->
-                                    location
-
-                                PatternTree _ ->
-                                    location
-
-                        PatternTree _ ->
+                ExprLocation expr path ->
+                    case path of
+                        Top ->
                             location
 
-                        DeclTree _ ->
-                            location
+                        ApplyPath left up right ->
+                            ExprLocation (Leaf "1") <|
+                                ApplyPath left up (expr :: right)
 
-                LetDecl left path right expr ->
-                    case location.current of
-                        DeclTree current ->
-                            case tree of
-                                DeclTree _ ->
-                                    { current = tree
-                                    , path = LetDecl left path (current :: right) expr
+                        LetExpr declarations up ->
+                            let
+                                newDeclaration =
+                                    { pattern = NamePattern "l"
+                                    , expr = Leaf "1"
                                     }
+                            in
+                            ExprLocation expr <| LetExpr (newDeclaration :: declarations) up
 
-                                ExprTree _ ->
-                                    location
-
-                                PatternTree _ ->
-                                    location
-
-                        PatternTree _ ->
+                        DeclExpr _ _ ->
                             location
 
-                        ExprTree _ ->
-                            location
-
-                LetExpr declarations path ->
-                    case location.current of
-                        ExprTree current ->
-                            case tree of
-                                DeclTree _ ->
-                                    { current = tree
-                                    , path = LetDecl declarations path [] current
-                                    }
-
-                                PatternTree _ ->
-                                    location
-
-                                ExprTree _ ->
-                                    location
-
-                        DeclTree _ ->
-                            location
-
-                        PatternTree _ ->
-                            location
-
-        InsertRight tree ->
-            case location.path of
-                Top ->
+        InsertRight ->
+            case location of
+                PatternLocation _ _ ->
                     location
 
-                ApplyPath left path right ->
-                    case location.current of
-                        ExprTree current ->
-                            case tree of
-                                ExprTree _ ->
-                                    { current = tree
-                                    , path = ApplyPath (current :: left) path right
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl left up right inExpr ->
+                            let
+                                newDeclaration =
+                                    { pattern = NamePattern "r"
+                                    , expr = Leaf "2"
                                     }
+                            in
+                            DeclLocation newDeclaration <|
+                                LetDecl (declaration :: left) up right inExpr
 
-                                PatternTree _ ->
-                                    location
-
-                                DeclTree _ ->
-                                    location
-
-                        PatternTree _ ->
+                ExprLocation expr path ->
+                    case path of
+                        Top ->
                             location
 
-                        DeclTree _ ->
+                        ApplyPath left up right ->
+                            let
+                                newExpr =
+                                    Leaf "e"
+                            in
+                            ExprLocation newExpr <|
+                                ApplyPath (expr :: left) up right
+
+                        LetExpr _ _ ->
+                            -- In theory we could interpret this as 'insert a new declaration at the bottom of the list of declarations'
+                            -- I suspect this is something of a common task, it's easy enough from here anyway you simply go right->insertRight.
+                            -- In general I suspect adding a new declaration to the inner most enclosing 'let' even if you're not actually
+                            -- on the outer-most 'inExpr' will be common, and we should probably have a separate task for that.
                             location
 
-                LetDecl left path right expr ->
-                    case location.current of
-                        DeclTree current ->
-                            case tree of
-                                DeclTree _ ->
-                                    { current = tree
-                                    , path = LetDecl (current :: left) path right expr
-                                    }
-
-                                PatternTree _ ->
-                                    location
-
-                                ExprTree _ ->
-                                    location
-
-                        PatternTree _ ->
+                        DeclExpr _ _ ->
                             location
-
-                        ExprTree _ ->
-                            location
-
-                LetExpr _ _ ->
-                    location
 
         PromoteLet ->
-            location
+            case location of
+                PatternLocation _ _ ->
+                    location
+
+                DeclLocation _ _ ->
+                    location
+
+                ExprLocation (Let _ _) _ ->
+                    location
+
+                ExprLocation expr path ->
+                    let
+                        newDeclaration =
+                            { pattern = NamePattern "n"
+                            , expr = Leaf "3"
+                            }
+
+                        newExpr =
+                            Let [ newDeclaration ] expr
+                    in
+                    ExprLocation expr path
+
+
+
+-- In several places we need to combine a list of children which are in path form.
+-- In this case, we'll have the left set of children, the 'hole' and the right set of
+-- children, with the left set reversed. This function builds up the expected list of
+-- children in the correct order.
+
+
+upList : List a -> a -> List a -> List a
+upList left hole right =
+    List.reverse left ++ (hole :: right)
 
 
 view : Model -> Browser.Document Msg
@@ -628,21 +584,33 @@ header location =
         moveUp =
             let
                 title =
-                    "up"
+                    "Up"
 
                 mMessage =
-                    case location.path of
-                        Top ->
-                            Nothing
+                    case location of
+                        ExprLocation _ path ->
+                            case path of
+                                Top ->
+                                    Nothing
 
-                        ApplyPath _ _ _ ->
-                            action MoveUp
+                                ApplyPath _ _ _ ->
+                                    action MoveUp
 
-                        LetDecl _ _ _ _ ->
-                            action MoveUp
+                                LetExpr _ _ ->
+                                    action MoveUp
 
-                        LetExpr _ _ ->
-                            action MoveUp
+                                DeclExpr _ _ ->
+                                    action MoveUp
+
+                        PatternLocation _ path ->
+                            case path of
+                                DeclPattern _ _ ->
+                                    action MoveUp
+
+                        DeclLocation _ path ->
+                            case path of
+                                LetDecl _ _ _ _ ->
+                                    action MoveUp
             in
             button title mMessage
 
@@ -652,24 +620,25 @@ header location =
                     "Down"
 
                 mMessage =
-                    case location.current of
-                        ExprTree (Leaf _) ->
-                            Nothing
+                    case location of
+                        ExprLocation expr _ ->
+                            case expr of
+                                Leaf _ ->
+                                    Nothing
 
-                        ExprTree (Apply []) ->
-                            Nothing
+                                Apply _ ->
+                                    action MoveDown
 
-                        ExprTree (Apply (_ :: _)) ->
+                                Let _ _ ->
+                                    action MoveDown
+
+                        PatternLocation pattern _ ->
+                            case pattern of
+                                NamePattern _ ->
+                                    Nothing
+
+                        DeclLocation _ _ ->
                             action MoveDown
-
-                        ExprTree (Let _ _) ->
-                            action MoveDown
-
-                        PatternTree _ ->
-                            Nothing
-
-                        DeclTree _ ->
-                            Nothing
             in
             button title mMessage
 
@@ -679,24 +648,39 @@ header location =
                     "Left"
 
                 mMessage =
-                    case location.path of
-                        Top ->
-                            Nothing
+                    case location of
+                        ExprLocation _ path ->
+                            case path of
+                                Top ->
+                                    Nothing
 
-                        ApplyPath [] _ _ ->
-                            Nothing
+                                ApplyPath [] _ _ ->
+                                    Nothing
 
-                        ApplyPath (_ :: _) _ _ ->
-                            action MoveLeft
+                                ApplyPath (_ :: _) _ _ ->
+                                    action MoveLeft
 
-                        LetDecl [] _ _ _ ->
-                            Nothing
+                                LetExpr [] _ ->
+                                    Nothing
 
-                        LetDecl (_ :: _) _ _ _ ->
-                            action MoveLeft
+                                LetExpr (_ :: _) _ ->
+                                    action MoveLeft
 
-                        LetExpr _ _ ->
-                            action MoveLeft
+                                DeclExpr _ _ ->
+                                    action MoveLeft
+
+                        PatternLocation _ path ->
+                            case path of
+                                DeclPattern _ _ ->
+                                    Nothing
+
+                        DeclLocation _ path ->
+                            case path of
+                                LetDecl [] _ _ _ ->
+                                    Nothing
+
+                                LetDecl (_ :: _) _ _ _ ->
+                                    action MoveLeft
             in
             button title mMessage
 
@@ -706,21 +690,36 @@ header location =
                     "Right"
 
                 mMessage =
-                    case location.path of
-                        Top ->
-                            Nothing
+                    case location of
+                        ExprLocation _ path ->
+                            case path of
+                                Top ->
+                                    Nothing
 
-                        ApplyPath _ _ [] ->
-                            Nothing
+                                ApplyPath _ _ [] ->
+                                    Nothing
 
-                        ApplyPath _ _ (_ :: _) ->
-                            action MoveRight
+                                ApplyPath _ _ (_ :: _) ->
+                                    action MoveRight
 
-                        LetDecl _ _ _ _ ->
-                            action MoveRight
+                                LetExpr _ _ ->
+                                    Nothing
 
-                        LetExpr _ _ ->
-                            Nothing
+                                DeclExpr _ _ ->
+                                    Nothing
+
+                        PatternLocation _ path ->
+                            case path of
+                                DeclPattern _ _ ->
+                                    action MoveRight
+
+                        DeclLocation _ path ->
+                            case path of
+                                LetDecl _ _ [] _ ->
+                                    Nothing
+
+                                LetDecl _ _ (_ :: _) _ ->
+                                    action MoveRight
             in
             button title mMessage
 
@@ -730,18 +729,30 @@ header location =
                     "InsertLeft"
 
                 mMessage =
-                    case location.path of
-                        Top ->
-                            Nothing
+                    case location of
+                        ExprLocation _ path ->
+                            case path of
+                                Top ->
+                                    Nothing
 
-                        ApplyPath _ _ _ ->
-                            action <| InsertLeft <| ExprTree (Leaf "l")
+                                ApplyPath _ _ _ ->
+                                    action InsertLeft
 
-                        LetDecl _ _ _ _ ->
-                            action <| InsertLeft <| DeclTree { pattern = NamePattern "_", expr = Leaf "e" }
+                                LetExpr _ _ ->
+                                    action InsertLeft
 
-                        LetExpr _ _ ->
-                            action <| InsertLeft <| DeclTree { pattern = NamePattern "_", expr = Leaf "e" }
+                                DeclExpr _ _ ->
+                                    Nothing
+
+                        PatternLocation _ path ->
+                            case path of
+                                DeclPattern _ _ ->
+                                    Nothing
+
+                        DeclLocation _ path ->
+                            case path of
+                                LetDecl _ _ _ _ ->
+                                    action InsertLeft
             in
             button title mMessage
 
@@ -751,18 +762,30 @@ header location =
                     "InsertRight"
 
                 mMessage =
-                    case location.path of
-                        Top ->
-                            Nothing
+                    case location of
+                        ExprLocation _ path ->
+                            case path of
+                                Top ->
+                                    Nothing
 
-                        ApplyPath _ _ _ ->
-                            action <| InsertRight <| ExprTree (Leaf "r")
+                                ApplyPath _ _ _ ->
+                                    action InsertRight
 
-                        LetDecl _ _ _ _ ->
-                            action <| InsertRight <| DeclTree { pattern = NamePattern "_", expr = Leaf "e" }
+                                LetExpr _ _ ->
+                                    Nothing
 
-                        LetExpr _ _ ->
-                            Nothing
+                                DeclExpr _ _ ->
+                                    Nothing
+
+                        PatternLocation _ path ->
+                            case path of
+                                DeclPattern _ _ ->
+                                    Nothing
+
+                        DeclLocation _ path ->
+                            case path of
+                                LetDecl _ _ _ _ ->
+                                    action InsertRight
             in
             button title mMessage
 
@@ -772,7 +795,23 @@ header location =
                     "Let"
 
                 mMessage =
-                    Nothing
+                    case location of
+                        ExprLocation expr _ ->
+                            case expr of
+                                Let _ _ ->
+                                    Nothing
+
+                                Leaf _ ->
+                                    action PromoteLet
+
+                                Apply _ ->
+                                    action PromoteLet
+
+                        PatternLocation _ _ ->
+                            Nothing
+
+                        DeclLocation _ _ ->
+                            Nothing
             in
             button title mMessage
     in
@@ -795,41 +834,6 @@ indentElement =
     Element.moveRight 10
 
 
-
-{- }
-   viewKind : TreeKind -> List (Element msg) -> Element msg
-   viewKind kind viewed =
-       let
-           viewInvalid children =
-               Element.column
-                   [ classAttribute "invalid-expression" ]
-                   (text "Invalid expression" :: children)
-       in
-       case ( kind, viewed ) of
-           ( Decl, [ pattern, expr ] ) ->
-
-
-           ( Let, children ) ->
-               case List.Extra.unconsLast children of
-                   Nothing ->
-                       viewInvalid children
-
-                   Just ( _, [] ) ->
-                       viewInvalid children
-
-                   Just ( last, decls ) ->
-
-
-           ( Appl, children ) ->
-               Element.row
-                   [ Element.spacing 8 ]
-                   children
-
-           ( _, children ) ->
-               viewInvalid children
--}
-
-
 viewKeyword : String -> Element msg
 viewKeyword word =
     el
@@ -846,19 +850,6 @@ viewPunctuation symbol =
         (text symbol)
 
 
-viewTree : Tree -> Element msg
-viewTree tree =
-    case tree of
-        ExprTree expr ->
-            viewExpr expr
-
-        DeclTree _ ->
-            text "Not done decls yet."
-
-        PatternTree _ ->
-            text "Not done patterns yet"
-
-
 viewExpr : Expr -> Element msg
 viewExpr expr =
     case expr of
@@ -869,7 +860,7 @@ viewExpr expr =
             viewApply <| List.map viewExpr children
 
         Let declarations inExpr ->
-            viewLet (List.map viewDeclaration declarations) (viewExpr inExpr)
+            viewLet (viewDeclarationList declarations) (viewExpr inExpr)
 
 
 viewLet : List (Element msg) -> Element msg -> Element msg
@@ -889,8 +880,8 @@ viewLet declarations expr =
         ]
 
 
-viewDeclaration : Declaration -> Element msg
-viewDeclaration decl =
+viewDeclaration : Element msg -> Element msg -> Element msg
+viewDeclaration declPattern declExpr =
     Element.column
         [ Element.padding 10 ]
         [ Element.row
@@ -899,13 +890,24 @@ viewDeclaration decl =
                 [ Element.width Element.fill
                 , Font.color themeColor4
                 ]
-                (viewPattern decl.pattern)
+                declPattern
             , viewPunctuation "="
             ]
         , el
             [ indentElement ]
-            (viewExpr decl.expr)
+            declExpr
         ]
+
+
+viewDeclarationList : List Declaration -> List (Element msg)
+viewDeclarationList declarations =
+    let
+        viewDecl decl =
+            viewDeclaration
+                (viewPattern decl.pattern)
+                (viewExpr decl.expr)
+    in
+    List.map viewDecl declarations
 
 
 viewPattern : Pattern -> Element msg
@@ -921,8 +923,16 @@ viewApply =
         [ Element.spacing 4 ]
 
 
-viewPath : Element msg -> Path -> Element msg
-viewPath viewed path =
+
+-- An alternative and easier way to do this, would be to just go-up until you reach the root
+-- and then draw that. It would mean creating the entire source tree, but what you're doing
+-- currently is a way of just cutting out that intermediate data structure, but the one you're
+-- building will be the same order. So you won't save much unless the tree is large.
+-- Another option, is to memoise the view of a tree, we can probably do this somehow with Element.lazy.
+
+
+viewExprPath : Element msg -> ExprPath -> Element msg
+viewExprPath viewed path =
     case path of
         Top ->
             el
@@ -931,62 +941,118 @@ viewPath viewed path =
 
         ApplyPath left up right ->
             let
+                leftViewed =
+                    List.map viewExpr left
+
+                rightViewed =
+                    List.map viewExpr right
+
                 children =
-                    (List.reverse <| List.map viewExpr left)
-                        ++ (viewed :: List.map viewExpr right)
+                    upList leftViewed viewed rightViewed
 
                 child =
                     viewApply children
             in
-            viewPath child up
-
-        LetDecl left up right expr ->
-            let
-                declarations =
-                    (List.reverse <| List.map viewDeclaration left)
-                        ++ (viewed :: List.map viewDeclaration right)
-
-                child =
-                    viewLet declarations <| viewExpr expr
-            in
-            viewPath child up
+            viewExprPath child up
 
         LetExpr declarations up ->
             let
                 child =
-                    viewLet (List.map viewDeclaration declarations) viewed
+                    viewLet (viewDeclarationList declarations) viewed
             in
-            viewPath child up
+            viewExprPath child up
+
+        DeclExpr pattern up ->
+            let
+                child =
+                    viewDeclaration (viewPattern pattern) viewed
+            in
+            viewDeclPath child up
 
 
-viewHighlighted : Tree -> Element Msg
-viewHighlighted tree =
-    case tree of
-        ExprTree (Leaf s) ->
-            Input.text
-                [ classAttribute "leaf-input"
-                , idAttribute leafBoxId
-                , Element.width Element.shrink
-                ]
-                { onChange = LeafInput
-                , text = s
-                , placeholder = Nothing
-                , label = Input.labelHidden ""
-                }
+viewDeclPath : Element msg -> DeclPath -> Element msg
+viewDeclPath viewed path =
+    case path of
+        LetDecl left up right expr ->
+            let
+                leftViewed =
+                    viewDeclarationList left
 
-        _ ->
-            el
-                [ Border.width 2
-                , Border.rounded 5
-                , Border.color themeColor2
-                , Element.padding 10
-                ]
-                (viewTree tree)
+                rightViewed =
+                    viewDeclarationList right
+
+                declarations =
+                    upList leftViewed viewed rightViewed
+
+                child =
+                    viewLet declarations <| viewExpr expr
+            in
+            viewExprPath child up
+
+
+viewPatternPath : Element msg -> PatternPath -> Element msg
+viewPatternPath viewed path =
+    case path of
+        DeclPattern up expr ->
+            viewDeclaration viewed <| viewExpr expr
+
+
+viewHighlighted : Element Msg -> Element Msg
+viewHighlighted viewed =
+    el
+        [ Border.width 2
+        , Border.rounded 5
+        , Border.color themeColor2
+        , Element.padding 10
+        ]
+        viewed
+
+
+viewFocusedLeaf : String -> Element Msg
+viewFocusedLeaf contents =
+    Input.text
+        [ classAttribute "leaf-input"
+        , idAttribute leafBoxId
+        , Element.width Element.shrink
+        ]
+        { onChange = LeafInput
+        , text = contents
+        , placeholder = Nothing
+        , label = Input.labelHidden ""
+        }
 
 
 viewLocation : Location -> Element Msg
 viewLocation location =
-    viewPath (viewHighlighted location.current) location.path
+    case location of
+        ExprLocation expr path ->
+            let
+                viewed =
+                    case expr of
+                        Leaf s ->
+                            viewFocusedLeaf s
+
+                        _ ->
+                            viewHighlighted <| viewExpr expr
+            in
+            viewExprPath viewed path
+
+        DeclLocation declaration path ->
+            let
+                viewed =
+                    viewHighlighted <|
+                        viewDeclaration
+                            (viewPattern declaration.pattern)
+                            (viewExpr declaration.expr)
+            in
+            viewDeclPath viewed path
+
+        PatternLocation pattern path ->
+            let
+                viewed =
+                    viewHighlighted <| viewPattern pattern
+            in
+            viewPatternPath viewed path
 
 
 idAttribute : String -> Element.Attribute msg
