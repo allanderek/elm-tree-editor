@@ -290,8 +290,8 @@ updateLocation action location =
 
                 DeclLocation declaration path ->
                     case path of
-                        LetDecl _ _ [] _ ->
-                            location
+                        LetDecl left up [] expr ->
+                            ExprLocation expr <| LetExpr (declaration :: left) up
 
                         LetDecl left up (r :: right) expr ->
                             DeclLocation r <| LetDecl (declaration :: left) up right expr
@@ -491,16 +491,21 @@ updateLocation action location =
                     location
 
                 ExprLocation expr path ->
-                    let
-                        newDeclaration =
-                            { pattern = NamePattern "n"
-                            , expr = Leaf "3"
-                            }
+                    case path of
+                        LetExpr _ _ ->
+                            location
 
-                        newExpr =
-                            Let [ newDeclaration ] expr
-                    in
-                    ExprLocation expr path
+                        _ ->
+                            let
+                                newDeclaration =
+                                    { pattern = NamePattern "n"
+                                    , expr = Leaf "3"
+                                    }
+
+                                newExpr =
+                                    Let [ newDeclaration ] expr
+                            in
+                            ExprLocation newExpr path
 
 
 
@@ -715,10 +720,7 @@ header location =
 
                         DeclLocation _ path ->
                             case path of
-                                LetDecl _ _ [] _ ->
-                                    Nothing
-
-                                LetDecl _ _ (_ :: _) _ ->
+                                LetDecl _ _ _ _ ->
                                     action MoveRight
             in
             button title mMessage
@@ -796,16 +798,21 @@ header location =
 
                 mMessage =
                     case location of
-                        ExprLocation expr _ ->
-                            case expr of
-                                Let _ _ ->
+                        ExprLocation expr path ->
+                            case path of
+                                LetExpr _ _ ->
                                     Nothing
 
-                                Leaf _ ->
-                                    action PromoteLet
+                                _ ->
+                                    case expr of
+                                        Let _ _ ->
+                                            Nothing
 
-                                Apply _ ->
-                                    action PromoteLet
+                                        Leaf _ ->
+                                            action PromoteLet
+
+                                        Apply _ ->
+                                            action PromoteLet
 
                         PatternLocation _ _ ->
                             Nothing
@@ -958,7 +965,7 @@ viewExprPath viewed path =
         LetExpr declarations up ->
             let
                 child =
-                    viewLet (viewDeclarationList declarations) viewed
+                    viewLet (List.reverse <| viewDeclarationList declarations) viewed
             in
             viewExprPath child up
 
@@ -994,7 +1001,11 @@ viewPatternPath : Element msg -> PatternPath -> Element msg
 viewPatternPath viewed path =
     case path of
         DeclPattern up expr ->
-            viewDeclaration viewed <| viewExpr expr
+            let
+                child =
+                    viewDeclaration viewed <| viewExpr expr
+            in
+            viewDeclPath child up
 
 
 viewHighlighted : Element Msg -> Element Msg
@@ -1050,7 +1061,9 @@ viewLocation location =
         PatternLocation pattern path ->
             let
                 viewed =
-                    viewHighlighted <| viewPattern pattern
+                    case pattern of
+                        NamePattern s ->
+                            viewFocusedLeaf s
             in
             viewPatternPath viewed path
 
