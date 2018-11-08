@@ -99,24 +99,39 @@ type Pattern
 
 
 type ExprPath
-    = Top
-    | ApplyPath (List Expr) ExprPath (List Expr)
+    = ApplyPath (List Expr) ExprPath (List Expr)
     | LetExpr (List Declaration) ExprPath
     | DeclExpr Pattern DeclPath
+    | ModuleDeclExpr Pattern ModuleDeclPath
 
 
 type DeclPath
     = LetDecl (List Declaration) ExprPath (List Declaration) Expr
 
 
+type ModuleDeclPath
+    = ModuleDecl (List ModuleDeclaration) (List ModuleDeclaration)
+
+
 type PatternPath
     = DeclPattern DeclPath Expr
+    | ModuleDeclPattern ModuleDeclPath Expr
+
+
+type ModuleDeclaration
+    = ValueDeclaration Declaration
+
+
+type alias Module =
+    List ModuleDeclaration
 
 
 type Location
     = ExprLocation Expr ExprPath
     | DeclLocation Declaration DeclPath
     | PatternLocation Pattern PatternPath
+    | ModuleDeclLocation ModuleDeclaration ModuleDeclPath
+    | ModuleLocation Module
 
 
 initialLocation : Location
@@ -130,8 +145,11 @@ initialLocation =
                 , { pattern = NamePattern "d", expr = Leaf "4" }
                 ]
                 (Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ])
+
+        moduleDecl =
+            ValueDeclaration { pattern = NamePattern "main", expr = expr }
     in
-    ExprLocation expr Top
+    ModuleLocation [ moduleDecl ]
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -250,11 +268,11 @@ updateLocation action location =
     case action of
         MoveLeft ->
             case location of
+                ModuleLocation _ ->
+                    location
+
                 ExprLocation expr path ->
                     case path of
-                        Top ->
-                            location
-
                         ApplyPath [] _ _ ->
                             location
 
@@ -270,6 +288,9 @@ updateLocation action location =
                         DeclExpr pattern up ->
                             PatternLocation pattern <| DeclPattern up expr
 
+                        ModuleDeclExpr pattern up ->
+                            PatternLocation pattern <| ModuleDeclPattern up expr
+
                 DeclLocation declaration path ->
                     case path of
                         LetDecl [] _ _ _ ->
@@ -279,14 +300,41 @@ updateLocation action location =
                             DeclLocation l <| LetDecl left up (declaration :: right) expr
 
                 PatternLocation pattern path ->
-                    location
+                    case path of
+                        DeclPattern _ _ ->
+                            location
+
+                        ModuleDeclPattern _ _ ->
+                            location
+
+                ModuleDeclLocation mDecl path ->
+                    case path of
+                        ModuleDecl [] _ ->
+                            location
+
+                        ModuleDecl (l :: left) right ->
+                            ModuleDeclLocation l <| ModuleDecl left (mDecl :: right)
 
         MoveRight ->
             case location of
+                ModuleLocation _ ->
+                    location
+
+                ModuleDeclLocation mDecl path ->
+                    case path of
+                        ModuleDecl _ [] ->
+                            location
+
+                        ModuleDecl left (r :: right) ->
+                            ModuleDeclLocation r <| ModuleDecl (mDecl :: left) right
+
                 PatternLocation pattern path ->
                     case path of
                         DeclPattern up expr ->
                             ExprLocation expr <| DeclExpr pattern up
+
+                        ModuleDeclPattern up expr ->
+                            ExprLocation expr <| ModuleDeclExpr pattern up
 
                 DeclLocation declaration path ->
                     case path of
@@ -298,9 +346,6 @@ updateLocation action location =
 
                 ExprLocation expr path ->
                     case path of
-                        Top ->
-                            location
-
                         ApplyPath _ _ [] ->
                             location
 
@@ -313,8 +358,23 @@ updateLocation action location =
                         DeclExpr _ _ ->
                             location
 
+                        ModuleDeclExpr _ _ ->
+                            location
+
         MoveUp ->
             case location of
+                ModuleLocation _ ->
+                    location
+
+                ModuleDeclLocation mDecl path ->
+                    case path of
+                        ModuleDecl left right ->
+                            let
+                                moduleTerm =
+                                    upList left mDecl right
+                            in
+                            ModuleLocation moduleTerm
+
                 PatternLocation pattern path ->
                     case path of
                         DeclPattern up expr ->
@@ -325,6 +385,18 @@ updateLocation action location =
                                     }
                             in
                             DeclLocation declaration up
+
+                        ModuleDeclPattern up expr ->
+                            let
+                                declaration =
+                                    { pattern = pattern
+                                    , expr = expr
+                                    }
+
+                                mDecl =
+                                    ValueDeclaration declaration
+                            in
+                            ModuleDeclLocation mDecl up
 
                 DeclLocation declaration path ->
                     case path of
@@ -340,9 +412,6 @@ updateLocation action location =
 
                 ExprLocation expr path ->
                     case path of
-                        Top ->
-                            location
-
                         ApplyPath left up right ->
                             let
                                 args =
@@ -366,8 +435,32 @@ updateLocation action location =
                             in
                             DeclLocation declaration up
 
+                        ModuleDeclExpr pattern up ->
+                            let
+                                declaration =
+                                    { pattern = pattern
+                                    , expr = expr
+                                    }
+
+                                mDecl =
+                                    ValueDeclaration declaration
+                            in
+                            ModuleDeclLocation mDecl up
+
         MoveDown ->
             case location of
+                ModuleLocation [] ->
+                    location
+
+                ModuleLocation (first :: rest) ->
+                    ModuleDeclLocation first <| ModuleDecl [] rest
+
+                ModuleDeclLocation mDecl up ->
+                    case mDecl of
+                        ValueDeclaration declaration ->
+                            PatternLocation declaration.pattern <|
+                                ModuleDeclPattern up declaration.expr
+
                 PatternLocation pattern up ->
                     case pattern of
                         NamePattern _ ->
@@ -403,6 +496,26 @@ updateLocation action location =
 
         InsertLeft ->
             case location of
+                ModuleLocation _ ->
+                    -- This is technically correct, but it's tempting to allow the insertion of
+                    -- some import statement here.
+                    location
+
+                ModuleDeclLocation mDecl path ->
+                    case path of
+                        ModuleDecl left right ->
+                            let
+                                declaration =
+                                    { pattern = NamePattern "ml"
+                                    , expr = Leaf "1"
+                                    }
+
+                                newMDecl =
+                                    ValueDeclaration declaration
+                            in
+                            ModuleDeclLocation newMDecl <|
+                                ModuleDecl left (mDecl :: right)
+
                 PatternLocation _ _ ->
                     location
 
@@ -420,9 +533,6 @@ updateLocation action location =
 
                 ExprLocation expr path ->
                     case path of
-                        Top ->
-                            location
-
                         ApplyPath left up right ->
                             ExprLocation (Leaf "1") <|
                                 ApplyPath left up (expr :: right)
@@ -439,8 +549,31 @@ updateLocation action location =
                         DeclExpr _ _ ->
                             location
 
+                        ModuleDeclExpr _ _ ->
+                            location
+
         InsertRight ->
             case location of
+                ModuleLocation _ ->
+                    -- This is technically correct, but it's tempting to allow the insertion of
+                    -- some value declaration to the end of the module file.
+                    location
+
+                ModuleDeclLocation mDecl path ->
+                    case path of
+                        ModuleDecl left right ->
+                            let
+                                declaration =
+                                    { pattern = NamePattern "mr"
+                                    , expr = Leaf "1"
+                                    }
+
+                                newMDecl =
+                                    ValueDeclaration declaration
+                            in
+                            ModuleDeclLocation newMDecl <|
+                                ModuleDecl (mDecl :: left) right
+
                 PatternLocation _ _ ->
                     location
 
@@ -458,9 +591,6 @@ updateLocation action location =
 
                 ExprLocation expr path ->
                     case path of
-                        Top ->
-                            location
-
                         ApplyPath left up right ->
                             let
                                 newExpr =
@@ -471,7 +601,7 @@ updateLocation action location =
 
                         LetExpr _ _ ->
                             -- In theory we could interpret this as 'insert a new declaration at the bottom of the list of declarations'
-                            -- I suspect this is something of a common task, it's easy enough from here anyway you simply go right->insertRight.
+                            -- I suspect this is something of a common task, it's easy enough from here anyway you simply go Right->insertRight.
                             -- In general I suspect adding a new declaration to the inner most enclosing 'let' even if you're not actually
                             -- on the outer-most 'inExpr' will be common, and we should probably have a separate task for that.
                             location
@@ -479,8 +609,17 @@ updateLocation action location =
                         DeclExpr _ _ ->
                             location
 
+                        ModuleDeclExpr _ _ ->
+                            location
+
         PromoteLet ->
             case location of
+                ModuleLocation _ ->
+                    location
+
+                ModuleDeclLocation _ _ ->
+                    location
+
                 PatternLocation _ _ ->
                     location
 
@@ -593,29 +732,20 @@ header location =
 
                 mMessage =
                     case location of
-                        ExprLocation _ path ->
-                            case path of
-                                Top ->
-                                    Nothing
+                        ModuleLocation _ ->
+                            Nothing
 
-                                ApplyPath _ _ _ ->
-                                    action MoveUp
+                        ModuleDeclLocation _ _ ->
+                            action MoveUp
 
-                                LetExpr _ _ ->
-                                    action MoveUp
+                        ExprLocation _ _ ->
+                            action MoveUp
 
-                                DeclExpr _ _ ->
-                                    action MoveUp
+                        PatternLocation _ _ ->
+                            action MoveUp
 
-                        PatternLocation _ path ->
-                            case path of
-                                DeclPattern _ _ ->
-                                    action MoveUp
-
-                        DeclLocation _ path ->
-                            case path of
-                                LetDecl _ _ _ _ ->
-                                    action MoveUp
+                        DeclLocation _ _ ->
+                            action MoveUp
             in
             button title mMessage
 
@@ -626,6 +756,12 @@ header location =
 
                 mMessage =
                     case location of
+                        ModuleLocation _ ->
+                            action MoveDown
+
+                        ModuleDeclLocation _ _ ->
+                            action MoveDown
+
                         ExprLocation expr _ ->
                             case expr of
                                 Leaf _ ->
@@ -654,11 +790,19 @@ header location =
 
                 mMessage =
                     case location of
-                        ExprLocation _ path ->
+                        ModuleLocation _ ->
+                            Nothing
+
+                        ModuleDeclLocation mDecl path ->
                             case path of
-                                Top ->
+                                ModuleDecl [] _ ->
                                     Nothing
 
+                                ModuleDecl (_ :: _) _ ->
+                                    action MoveLeft
+
+                        ExprLocation _ path ->
+                            case path of
                                 ApplyPath [] _ _ ->
                                     Nothing
 
@@ -674,9 +818,15 @@ header location =
                                 DeclExpr _ _ ->
                                     action MoveLeft
 
+                                ModuleDeclExpr _ _ ->
+                                    action MoveLeft
+
                         PatternLocation _ path ->
                             case path of
                                 DeclPattern _ _ ->
+                                    Nothing
+
+                                ModuleDeclPattern _ _ ->
                                     Nothing
 
                         DeclLocation _ path ->
@@ -696,11 +846,19 @@ header location =
 
                 mMessage =
                     case location of
-                        ExprLocation _ path ->
+                        ModuleLocation _ ->
+                            Nothing
+
+                        ModuleDeclLocation _ path ->
                             case path of
-                                Top ->
+                                ModuleDecl _ [] ->
                                     Nothing
 
+                                ModuleDecl _ (_ :: _) ->
+                                    action MoveRight
+
+                        ExprLocation _ path ->
+                            case path of
                                 ApplyPath _ _ [] ->
                                     Nothing
 
@@ -713,9 +871,15 @@ header location =
                                 DeclExpr _ _ ->
                                     Nothing
 
+                                ModuleDeclExpr _ _ ->
+                                    Nothing
+
                         PatternLocation _ path ->
                             case path of
                                 DeclPattern _ _ ->
+                                    action MoveRight
+
+                                ModuleDeclPattern _ _ ->
                                     action MoveRight
 
                         DeclLocation _ path ->
@@ -732,11 +896,16 @@ header location =
 
                 mMessage =
                     case location of
+                        ModuleLocation _ ->
+                            Nothing
+
+                        ModuleDeclLocation _ path ->
+                            case path of
+                                ModuleDecl _ _ ->
+                                    action InsertLeft
+
                         ExprLocation _ path ->
                             case path of
-                                Top ->
-                                    Nothing
-
                                 ApplyPath _ _ _ ->
                                     action InsertLeft
 
@@ -746,9 +915,15 @@ header location =
                                 DeclExpr _ _ ->
                                     Nothing
 
+                                ModuleDeclExpr _ _ ->
+                                    Nothing
+
                         PatternLocation _ path ->
                             case path of
                                 DeclPattern _ _ ->
+                                    Nothing
+
+                                ModuleDeclPattern _ _ ->
                                     Nothing
 
                         DeclLocation _ path ->
@@ -765,11 +940,14 @@ header location =
 
                 mMessage =
                     case location of
+                        ModuleLocation _ ->
+                            Nothing
+
+                        ModuleDeclLocation _ _ ->
+                            action InsertRight
+
                         ExprLocation _ path ->
                             case path of
-                                Top ->
-                                    Nothing
-
                                 ApplyPath _ _ _ ->
                                     action InsertRight
 
@@ -779,9 +957,15 @@ header location =
                                 DeclExpr _ _ ->
                                     Nothing
 
+                                ModuleDeclExpr _ _ ->
+                                    Nothing
+
                         PatternLocation _ path ->
                             case path of
                                 DeclPattern _ _ ->
+                                    Nothing
+
+                                ModuleDeclPattern _ _ ->
                                     Nothing
 
                         DeclLocation _ path ->
@@ -798,6 +982,12 @@ header location =
 
                 mMessage =
                     case location of
+                        ModuleLocation _ ->
+                            Nothing
+
+                        ModuleDeclLocation _ _ ->
+                            Nothing
+
                         ExprLocation expr path ->
                             case path of
                                 LetExpr _ _ ->
@@ -908,13 +1098,22 @@ viewDeclaration declPattern declExpr =
 
 viewDeclarationList : List Declaration -> List (Element msg)
 viewDeclarationList declarations =
-    let
-        viewDecl decl =
-            viewDeclaration
-                (viewPattern decl.pattern)
-                (viewExpr decl.expr)
-    in
     List.map viewDecl declarations
+
+
+
+-- We should use a scheme to distinguish between laying out a tree segment from the
+-- already viewed constitient parts, and viewing something from scratch, eg.
+-- viewDeclaration : Declaration -> Element msg
+-- which would use
+-- layoutDeclaration : Element msg -> Element msg -> Element msg
+
+
+viewDecl : Declaration -> Element msg
+viewDecl decl =
+    viewDeclaration
+        (viewPattern decl.pattern)
+        (viewExpr decl.expr)
 
 
 viewPattern : Pattern -> Element msg
@@ -941,11 +1140,6 @@ viewApply =
 viewExprPath : Element msg -> ExprPath -> Element msg
 viewExprPath viewed path =
     case path of
-        Top ->
-            el
-                [ classAttribute "top" ]
-                viewed
-
         ApplyPath left up right ->
             let
                 leftViewed =
@@ -975,6 +1169,13 @@ viewExprPath viewed path =
                     viewDeclaration (viewPattern pattern) viewed
             in
             viewDeclPath child up
+
+        ModuleDeclExpr pattern up ->
+            let
+                child =
+                    viewDeclaration (viewPattern pattern) viewed
+            in
+            viewModuleDeclPath child up
 
 
 viewDeclPath : Element msg -> DeclPath -> Element msg
@@ -1007,6 +1208,51 @@ viewPatternPath viewed path =
             in
             viewDeclPath child up
 
+        ModuleDeclPattern up expr ->
+            let
+                child =
+                    viewDeclaration viewed <| viewExpr expr
+            in
+            viewModuleDeclPath child up
+
+
+viewModuleDeclaration : ModuleDeclaration -> Element msg
+viewModuleDeclaration mDecl =
+    case mDecl of
+        ValueDeclaration declaration ->
+            viewDecl declaration
+
+
+viewModuleDeclPath : Element msg -> ModuleDeclPath -> Element msg
+viewModuleDeclPath viewed path =
+    case path of
+        ModuleDecl left right ->
+            let
+                leftViewed =
+                    List.map viewModuleDeclaration left
+
+                rightViewed =
+                    List.map viewModuleDeclaration right
+            in
+            viewModule <| upList leftViewed viewed rightViewed
+
+
+viewModule : List (Element msg) -> Element msg
+viewModule mDecls =
+    let
+        heading =
+            Element.row
+                [ Element.spacing 2 ]
+                [ viewKeyword "module"
+                , text "Main"
+                , viewKeyword "exposing"
+                , viewPunctuation "(..)"
+                ]
+    in
+    Element.column
+        [ Element.spacing 10 ]
+        (heading :: mDecls)
+
 
 viewHighlighted : Element Msg -> Element Msg
 viewHighlighted viewed =
@@ -1036,6 +1282,16 @@ viewFocusedLeaf contents =
 viewLocation : Location -> Element Msg
 viewLocation location =
     case location of
+        ModuleLocation mDecls ->
+            viewHighlighted <| viewModule <| List.map viewModuleDeclaration mDecls
+
+        ModuleDeclLocation mDecl path ->
+            let
+                viewed =
+                    viewHighlighted <| viewModuleDeclaration mDecl
+            in
+            viewModuleDeclPath viewed path
+
         ExprLocation expr path ->
             let
                 viewed =
