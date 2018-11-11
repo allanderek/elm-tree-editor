@@ -54,16 +54,16 @@ keySubscription =
         keyToEditorAction string =
             case string of
                 "ArrowLeft" ->
-                    Just MoveLeft
+                    Just GoLeft
 
                 "ArrowRight" ->
-                    Just MoveRight
+                    Just GoRight
 
                 "ArrowUp" ->
-                    Just MoveUp
+                    Just GoUp
 
                 "ArrowDown" ->
-                    Just MoveDown
+                    Just GoDown
 
                 _ ->
                     Nothing
@@ -204,10 +204,10 @@ type Msg
 
 
 type EditorAction
-    = MoveLeft
-    | MoveRight
-    | MoveUp
-    | MoveDown
+    = GoLeft
+    | GoRight
+    | GoUp
+    | GoDown
     | InsertLeft
     | InsertRight
     | PromoteLet
@@ -315,7 +315,7 @@ withCommands model commands =
 updateLocation : EditorAction -> Location -> Location
 updateLocation action location =
     case action of
-        MoveLeft ->
+        GoLeft ->
             case location of
                 ModuleLocation _ ->
                     location
@@ -375,7 +375,7 @@ updateLocation action location =
                         ModuleDecl (l :: left) right ->
                             ModuleDeclLocation l <| ModuleDecl left (mDecl :: right)
 
-        MoveRight ->
+        GoRight ->
             case location of
                 ModuleLocation _ ->
                     location
@@ -431,7 +431,7 @@ updateLocation action location =
                         ModuleDeclExpr _ _ ->
                             location
 
-        MoveUp ->
+        GoUp ->
             case location of
                 ModuleLocation _ ->
                     location
@@ -535,7 +535,7 @@ updateLocation action location =
                             in
                             ModuleDeclLocation mDecl up
 
-        MoveDown ->
+        GoDown ->
             case location of
                 ModuleLocation [] ->
                     location
@@ -590,7 +590,7 @@ updateLocation action location =
                             -- This should not happen but I guess it's kind of possible if someone is deleting declarations
                             -- the question is whether, when someone deletes the last declaration we just coalasce the expression or not.
                             -- We could actually just do this regardless of how many declarations there are. I suspect at some point I might
-                            -- have MoveDownLeft and MoveDownRight.
+                            -- have GoDownLeft and GoDownRight.
                             ExprLocation inExpr <| LetExpr [] up
 
                         Let (first :: rest) inExpr ->
@@ -729,7 +729,7 @@ updateLocation action location =
         InsertTypeDecl ->
             case location of
                 ModuleLocation moduleDecls ->
-                    -- TODO: We would be better to just move down first, and then insert the type declaration,
+                    -- TODO: We would be better to just go down first, and then insert the type declaration,
                     -- rather than have this kind of duplication of code here.
                     let
                         newTypeDecl =
@@ -748,7 +748,7 @@ updateLocation action location =
                             ModuleDeclLocation newTypeDecl <|
                                 ModuleDecl left (currentDecl :: right)
 
-                -- All of these remaining ones, could absolutely accept a InsertTypeDecl, you just need to move up
+                -- All of these remaining ones, could absolutely accept a InsertTypeDecl, you just need to go up
                 -- until you get to the module declarations and *then* insert the new type declaration.
                 TypePatternLocation tPattern path ->
                     location
@@ -887,7 +887,7 @@ header location =
         action =
             Just << EditorAction
 
-        moveUp =
+        goUp =
             let
                 title =
                     "Up"
@@ -898,26 +898,26 @@ header location =
                             Nothing
 
                         TypePatternLocation _ _ ->
-                            action MoveUp
+                            action GoUp
 
                         TypeExprLocation _ _ ->
-                            action MoveUp
+                            action GoUp
 
                         ModuleDeclLocation _ _ ->
-                            action MoveUp
+                            action GoUp
 
                         ExprLocation _ _ ->
-                            action MoveUp
+                            action GoUp
 
                         PatternLocation _ _ ->
-                            action MoveUp
+                            action GoUp
 
                         DeclLocation _ _ ->
-                            action MoveUp
+                            action GoUp
             in
             button title mMessage
 
-        moveDown =
+        goDown =
             let
                 title =
                     "Down"
@@ -925,10 +925,10 @@ header location =
                 mMessage =
                     case location of
                         ModuleLocation _ ->
-                            action MoveDown
+                            action GoDown
 
                         ModuleDeclLocation _ _ ->
-                            action MoveDown
+                            action GoDown
 
                         TypePatternLocation tPattern _ ->
                             case tPattern of
@@ -946,10 +946,10 @@ header location =
                                     Nothing
 
                                 Apply _ ->
-                                    action MoveDown
+                                    action GoDown
 
                                 Let _ _ ->
-                                    action MoveDown
+                                    action GoDown
 
                         PatternLocation pattern _ ->
                             case pattern of
@@ -957,11 +957,11 @@ header location =
                                     Nothing
 
                         DeclLocation _ _ ->
-                            action MoveDown
+                            action GoDown
             in
             button title mMessage
 
-        moveLeft =
+        goLeft =
             let
                 title =
                     "Left"
@@ -977,7 +977,7 @@ header location =
                                     Nothing
 
                                 ModuleDecl (_ :: _) _ ->
-                                    action MoveLeft
+                                    action GoLeft
 
                         TypePatternLocation _ path ->
                             case path of
@@ -987,7 +987,7 @@ header location =
                         TypeExprLocation _ path ->
                             case path of
                                 ModuleDeclType _ _ ->
-                                    action MoveLeft
+                                    action GoLeft
 
                         ExprLocation _ path ->
                             case path of
@@ -995,19 +995,19 @@ header location =
                                     Nothing
 
                                 ApplyPath (_ :: _) _ _ ->
-                                    action MoveLeft
+                                    action GoLeft
 
                                 LetExpr [] _ ->
                                     Nothing
 
                                 LetExpr (_ :: _) _ ->
-                                    action MoveLeft
+                                    action GoLeft
 
                                 DeclExpr _ _ ->
-                                    action MoveLeft
+                                    action GoLeft
 
                                 ModuleDeclExpr _ _ ->
-                                    action MoveLeft
+                                    action GoLeft
 
                         PatternLocation _ path ->
                             case path of
@@ -1023,11 +1023,11 @@ header location =
                                     Nothing
 
                                 LetDecl (_ :: _) _ _ _ ->
-                                    action MoveLeft
+                                    action GoLeft
             in
             button title mMessage
 
-        moveRight =
+        goRight =
             let
                 title =
                     "Right"
@@ -1043,12 +1043,12 @@ header location =
                                     Nothing
 
                                 ModuleDecl _ (_ :: _) ->
-                                    action MoveRight
+                                    action GoRight
 
                         TypePatternLocation _ path ->
                             case path of
                                 ModuleDeclTypePattern _ _ ->
-                                    action MoveRight
+                                    action GoRight
 
                         TypeExprLocation _ path ->
                             case path of
@@ -1061,7 +1061,7 @@ header location =
                                     Nothing
 
                                 ApplyPath _ _ (_ :: _) ->
-                                    action MoveRight
+                                    action GoRight
 
                                 LetExpr _ _ ->
                                     Nothing
@@ -1075,15 +1075,15 @@ header location =
                         PatternLocation _ path ->
                             case path of
                                 DeclPattern _ _ ->
-                                    action MoveRight
+                                    action GoRight
 
                                 ModuleDeclPattern _ _ ->
-                                    action MoveRight
+                                    action GoRight
 
                         DeclLocation _ path ->
                             case path of
                                 LetDecl _ _ _ _ ->
-                                    action MoveRight
+                                    action GoRight
             in
             button title mMessage
 
@@ -1208,7 +1208,7 @@ header location =
 
                         -- As noted in the definition of the update for InsertTypeDecl all of these
                         -- other cases *could* absolutely accept the 'insert type declaration' you just
-                        -- need to move up until you get to a module declaration.
+                        -- need to go up until you get to a module declaration.
                         TypePatternLocation _ path ->
                             Nothing
 
@@ -1277,10 +1277,10 @@ header location =
         [ Element.width Element.fill
         , Element.spaceEvenly
         ]
-        [ moveUp
-        , moveDown
-        , moveLeft
-        , moveRight
+        [ goUp
+        , goDown
+        , goLeft
+        , goRight
         , insertLeft
         , insertRight
         , insertTypeDecl
