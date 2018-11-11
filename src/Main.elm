@@ -85,10 +85,10 @@ type alias Model =
 type Expr
     = Leaf String
     | Apply (List Expr)
-    | Let (List Declaration) Expr
+    | Let (List ValueDeclaration) Expr
 
 
-type alias Declaration =
+type alias ValueDeclaration =
     { pattern : Pattern
     , expr : Expr
     }
@@ -100,13 +100,13 @@ type Pattern
 
 type ExprPath
     = ApplyPath (List Expr) ExprPath (List Expr)
-    | LetExpr (List Declaration) ExprPath
+    | LetExpr (List ValueDeclaration) ExprPath
     | DeclExpr Pattern DeclPath
     | ModuleDeclExpr Pattern ModuleDeclPath
 
 
 type DeclPath
-    = LetDecl (List Declaration) ExprPath (List Declaration) Expr
+    = LetDecl (List ValueDeclaration) ExprPath (List ValueDeclaration) Expr
 
 
 type ModuleDeclPath
@@ -119,7 +119,30 @@ type PatternPath
 
 
 type ModuleDeclaration
-    = ValueDeclaration Declaration
+    = ModuleValueDeclaration ValueDeclaration
+    | ModuleTypeDeclaration TypeDeclaration
+
+
+type alias TypeDeclaration =
+    { pattern : TypePattern
+    , typeExpr : TypeExpr
+    }
+
+
+type TypePattern
+    = NameTypePattern String
+
+
+type TypePatternPath
+    = ModuleDeclTypePattern ModuleDeclPath TypeExpr
+
+
+type TypeExpr
+    = NameType String
+
+
+type TypeExprPath
+    = ModuleDeclType TypePattern ModuleDeclPath
 
 
 type alias Module =
@@ -128,8 +151,10 @@ type alias Module =
 
 type Location
     = ExprLocation Expr ExprPath
-    | DeclLocation Declaration DeclPath
+    | DeclLocation ValueDeclaration DeclPath
     | PatternLocation Pattern PatternPath
+    | TypeExprLocation TypeExpr TypeExprPath
+    | TypePatternLocation TypePattern TypePatternPath
     | ModuleDeclLocation ModuleDeclaration ModuleDeclPath
     | ModuleLocation Module
 
@@ -147,9 +172,12 @@ initialLocation =
                 (Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ])
 
         moduleDecl =
-            ValueDeclaration { pattern = NamePattern "main", expr = expr }
+            ModuleValueDeclaration { pattern = NamePattern "main", expr = expr }
+
+        typeDecl =
+            ModuleTypeDeclaration { pattern = NameTypePattern "Person", typeExpr = NameType "String" }
     in
-    ModuleLocation [ moduleDecl ]
+    ModuleLocation [ typeDecl, moduleDecl ]
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -183,6 +211,7 @@ type EditorAction
     | InsertLeft
     | InsertRight
     | PromoteLet
+    | InsertTypeDecl
 
 
 leafBoxId : String
@@ -229,6 +258,12 @@ update msg model =
                         PatternLocation (NamePattern _) _ ->
                             focusLeafBox
 
+                        TypePatternLocation (NameTypePattern _) _ ->
+                            focusLeafBox
+
+                        TypeExprLocation (NameType _) _ ->
+                            focusLeafBox
+
                         _ ->
                             Cmd.none
             in
@@ -249,6 +284,20 @@ update msg model =
                             let
                                 newLocation =
                                     PatternLocation (NamePattern content) path
+                            in
+                            { model | location = newLocation }
+
+                        TypeExprLocation (NameType _) path ->
+                            let
+                                newLocation =
+                                    TypeExprLocation (NameType content) path
+                            in
+                            { model | location = newLocation }
+
+                        TypePatternLocation (NameTypePattern _) path ->
+                            let
+                                newLocation =
+                                    TypePatternLocation (NameTypePattern content) path
                             in
                             { model | location = newLocation }
 
@@ -307,6 +356,17 @@ updateLocation action location =
                         ModuleDeclPattern _ _ ->
                             location
 
+                TypeExprLocation typeExpr path ->
+                    case path of
+                        ModuleDeclType tPattern mDeclPath ->
+                            TypePatternLocation tPattern <|
+                                ModuleDeclTypePattern mDeclPath typeExpr
+
+                TypePatternLocation _ path ->
+                    case path of
+                        ModuleDeclTypePattern _ _ ->
+                            location
+
                 ModuleDeclLocation mDecl path ->
                     case path of
                         ModuleDecl [] _ ->
@@ -327,6 +387,16 @@ updateLocation action location =
 
                         ModuleDecl left (r :: right) ->
                             ModuleDeclLocation r <| ModuleDecl (mDecl :: left) right
+
+                TypeExprLocation typeExpr path ->
+                    case path of
+                        ModuleDeclType tPattern mDeclPath ->
+                            location
+
+                TypePatternLocation tPattern path ->
+                    case path of
+                        ModuleDeclTypePattern up typeExpr ->
+                            TypeExprLocation typeExpr <| ModuleDeclType tPattern up
 
                 PatternLocation pattern path ->
                     case path of
@@ -375,6 +445,24 @@ updateLocation action location =
                             in
                             ModuleLocation moduleTerm
 
+                TypeExprLocation typeExpr path ->
+                    case path of
+                        ModuleDeclType tPattern up ->
+                            let
+                                declaration =
+                                    ModuleTypeDeclaration { pattern = tPattern, typeExpr = typeExpr }
+                            in
+                            ModuleDeclLocation declaration up
+
+                TypePatternLocation tPattern path ->
+                    case path of
+                        ModuleDeclTypePattern up typeExpr ->
+                            let
+                                declaration =
+                                    ModuleTypeDeclaration { pattern = tPattern, typeExpr = typeExpr }
+                            in
+                            ModuleDeclLocation declaration up
+
                 PatternLocation pattern path ->
                     case path of
                         DeclPattern up expr ->
@@ -394,7 +482,7 @@ updateLocation action location =
                                     }
 
                                 mDecl =
-                                    ValueDeclaration declaration
+                                    ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation mDecl up
 
@@ -443,7 +531,7 @@ updateLocation action location =
                                     }
 
                                 mDecl =
-                                    ValueDeclaration declaration
+                                    ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation mDecl up
 
@@ -457,9 +545,23 @@ updateLocation action location =
 
                 ModuleDeclLocation mDecl up ->
                     case mDecl of
-                        ValueDeclaration declaration ->
+                        ModuleValueDeclaration declaration ->
                             PatternLocation declaration.pattern <|
                                 ModuleDeclPattern up declaration.expr
+
+                        ModuleTypeDeclaration declaration ->
+                            TypePatternLocation declaration.pattern <|
+                                ModuleDeclTypePattern up declaration.typeExpr
+
+                TypePatternLocation tPattern path ->
+                    case tPattern of
+                        NameTypePattern _ ->
+                            location
+
+                TypeExprLocation typeExpr path ->
+                    case typeExpr of
+                        NameType _ ->
+                            location
 
                 PatternLocation pattern up ->
                     case pattern of
@@ -511,10 +613,16 @@ updateLocation action location =
                                     }
 
                                 newMDecl =
-                                    ValueDeclaration declaration
+                                    ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation newMDecl <|
                                 ModuleDecl left (mDecl :: right)
+
+                TypePatternLocation tPattern path ->
+                    location
+
+                TypeExprLocation typeExpr path ->
+                    location
 
                 PatternLocation _ _ ->
                     location
@@ -569,10 +677,16 @@ updateLocation action location =
                                     }
 
                                 newMDecl =
-                                    ValueDeclaration declaration
+                                    ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation newMDecl <|
                                 ModuleDecl (mDecl :: left) right
+
+                TypePatternLocation tPattern path ->
+                    location
+
+                TypeExprLocation typeExpr path ->
+                    location
 
                 PatternLocation _ _ ->
                     location
@@ -612,12 +726,60 @@ updateLocation action location =
                         ModuleDeclExpr _ _ ->
                             location
 
+        InsertTypeDecl ->
+            case location of
+                ModuleLocation moduleDecls ->
+                    -- TODO: We would be better to just move down first, and then insert the type declaration,
+                    -- rather than have this kind of duplication of code here.
+                    let
+                        newTypeDecl =
+                            ModuleTypeDeclaration { pattern = NameTypePattern "A", typeExpr = NameType "String" }
+                    in
+                    ModuleDeclLocation newTypeDecl <|
+                        ModuleDecl [] moduleDecls
+
+                ModuleDeclLocation currentDecl path ->
+                    case path of
+                        ModuleDecl left right ->
+                            let
+                                newTypeDecl =
+                                    ModuleTypeDeclaration { pattern = NameTypePattern "A", typeExpr = NameType "String" }
+                            in
+                            ModuleDeclLocation newTypeDecl <|
+                                ModuleDecl left (currentDecl :: right)
+
+                -- All of these remaining ones, could absolutely accept a InsertTypeDecl, you just need to move up
+                -- until you get to the module declarations and *then* insert the new type declaration.
+                TypePatternLocation tPattern path ->
+                    location
+
+                TypeExprLocation typeExpr path ->
+                    location
+
+                PatternLocation _ _ ->
+                    location
+
+                DeclLocation _ _ ->
+                    location
+
+                ExprLocation (Let _ _) _ ->
+                    location
+
+                ExprLocation expr path ->
+                    location
+
         PromoteLet ->
             case location of
                 ModuleLocation _ ->
                     location
 
                 ModuleDeclLocation _ _ ->
+                    location
+
+                TypePatternLocation tPattern path ->
+                    location
+
+                TypeExprLocation typeExpr path ->
                     location
 
                 PatternLocation _ _ ->
@@ -735,6 +897,12 @@ header location =
                         ModuleLocation _ ->
                             Nothing
 
+                        TypePatternLocation _ _ ->
+                            action MoveUp
+
+                        TypeExprLocation _ _ ->
+                            action MoveUp
+
                         ModuleDeclLocation _ _ ->
                             action MoveUp
 
@@ -761,6 +929,16 @@ header location =
 
                         ModuleDeclLocation _ _ ->
                             action MoveDown
+
+                        TypePatternLocation tPattern _ ->
+                            case tPattern of
+                                NameTypePattern _ ->
+                                    Nothing
+
+                        TypeExprLocation tExpr _ ->
+                            case tExpr of
+                                NameType _ ->
+                                    Nothing
 
                         ExprLocation expr _ ->
                             case expr of
@@ -799,6 +977,16 @@ header location =
                                     Nothing
 
                                 ModuleDecl (_ :: _) _ ->
+                                    action MoveLeft
+
+                        TypePatternLocation _ path ->
+                            case path of
+                                ModuleDeclTypePattern _ _ ->
+                                    Nothing
+
+                        TypeExprLocation _ path ->
+                            case path of
+                                ModuleDeclType _ _ ->
                                     action MoveLeft
 
                         ExprLocation _ path ->
@@ -857,6 +1045,16 @@ header location =
                                 ModuleDecl _ (_ :: _) ->
                                     action MoveRight
 
+                        TypePatternLocation _ path ->
+                            case path of
+                                ModuleDeclTypePattern _ _ ->
+                                    action MoveRight
+
+                        TypeExprLocation _ path ->
+                            case path of
+                                ModuleDeclType _ _ ->
+                                    Nothing
+
                         ExprLocation _ path ->
                             case path of
                                 ApplyPath _ _ [] ->
@@ -904,6 +1102,16 @@ header location =
                                 ModuleDecl _ _ ->
                                     action InsertLeft
 
+                        TypePatternLocation _ path ->
+                            case path of
+                                ModuleDeclTypePattern _ _ ->
+                                    Nothing
+
+                        TypeExprLocation _ path ->
+                            case path of
+                                ModuleDeclType _ _ ->
+                                    Nothing
+
                         ExprLocation _ path ->
                             case path of
                                 ApplyPath _ _ _ ->
@@ -946,6 +1154,16 @@ header location =
                         ModuleDeclLocation _ _ ->
                             action InsertRight
 
+                        TypePatternLocation _ path ->
+                            case path of
+                                ModuleDeclTypePattern _ _ ->
+                                    Nothing
+
+                        TypeExprLocation _ path ->
+                            case path of
+                                ModuleDeclType _ _ ->
+                                    Nothing
+
                         ExprLocation _ path ->
                             case path of
                                 ApplyPath _ _ _ ->
@@ -975,6 +1193,39 @@ header location =
             in
             button title mMessage
 
+        insertTypeDecl =
+            let
+                title =
+                    "Insert type"
+
+                mMessage =
+                    case location of
+                        ModuleLocation _ ->
+                            action InsertTypeDecl
+
+                        ModuleDeclLocation _ _ ->
+                            action InsertTypeDecl
+
+                        -- As noted in the definition of the update for InsertTypeDecl all of these
+                        -- other cases *could* absolutely accept the 'insert type declaration' you just
+                        -- need to move up until you get to a module declaration.
+                        TypePatternLocation _ path ->
+                            Nothing
+
+                        TypeExprLocation _ path ->
+                            Nothing
+
+                        ExprLocation expr path ->
+                            Nothing
+
+                        PatternLocation _ _ ->
+                            Nothing
+
+                        DeclLocation _ _ ->
+                            Nothing
+            in
+            button title mMessage
+
         promoteLet =
             let
                 title =
@@ -987,6 +1238,16 @@ header location =
 
                         ModuleDeclLocation _ _ ->
                             Nothing
+
+                        TypePatternLocation _ path ->
+                            case path of
+                                ModuleDeclTypePattern _ _ ->
+                                    Nothing
+
+                        TypeExprLocation _ path ->
+                            case path of
+                                ModuleDeclType _ _ ->
+                                    Nothing
 
                         ExprLocation expr path ->
                             case path of
@@ -1022,6 +1283,7 @@ header location =
         , moveRight
         , insertLeft
         , insertRight
+        , insertTypeDecl
         , promoteLet
         ]
 
@@ -1096,7 +1358,7 @@ viewDeclaration declPattern declExpr =
         ]
 
 
-viewDeclarationList : List Declaration -> List (Element msg)
+viewDeclarationList : List ValueDeclaration -> List (Element msg)
 viewDeclarationList declarations =
     List.map viewDecl declarations
 
@@ -1109,7 +1371,7 @@ viewDeclarationList declarations =
 -- layoutDeclaration : Element msg -> Element msg -> Element msg
 
 
-viewDecl : Declaration -> Element msg
+viewDecl : ValueDeclaration -> Element msg
 viewDecl decl =
     viewDeclaration
         (viewPattern decl.pattern)
@@ -1216,11 +1478,70 @@ viewPatternPath viewed path =
             viewModuleDeclPath child up
 
 
+viewTypePattern : TypePattern -> Element msg
+viewTypePattern typePattern =
+    case typePattern of
+        NameTypePattern s ->
+            text s
+
+
+viewTypeExpr : TypeExpr -> Element msg
+viewTypeExpr typeExpr =
+    case typeExpr of
+        NameType s ->
+            text s
+
+
+layoutTypeDeclaration : Element msg -> Element msg -> Element msg
+layoutTypeDeclaration viewedTypePattern viewedTypeExpr =
+    Element.column
+        []
+        [ Element.row
+            [ Element.spacing 5 ]
+            [ viewKeyword "type"
+            , viewedTypePattern
+            , viewPunctuation "="
+            ]
+        , viewedTypeExpr
+        ]
+
+
+viewTypeExprPath : Element msg -> TypeExprPath -> Element msg
+viewTypeExprPath viewed path =
+    case path of
+        ModuleDeclType tPattern up ->
+            let
+                newViewed =
+                    layoutTypeDeclaration
+                        (viewTypePattern tPattern)
+                        viewed
+            in
+            viewModuleDeclPath newViewed up
+
+
+viewTypePatternPath : Element msg -> TypePatternPath -> Element msg
+viewTypePatternPath viewed path =
+    case path of
+        ModuleDeclTypePattern up tExpr ->
+            let
+                newViewed =
+                    layoutTypeDeclaration
+                        viewed
+                        (viewTypeExpr tExpr)
+            in
+            viewModuleDeclPath newViewed up
+
+
 viewModuleDeclaration : ModuleDeclaration -> Element msg
 viewModuleDeclaration mDecl =
     case mDecl of
-        ValueDeclaration declaration ->
+        ModuleValueDeclaration declaration ->
             viewDecl declaration
+
+        ModuleTypeDeclaration declaration ->
+            layoutTypeDeclaration
+                (viewTypePattern declaration.pattern)
+                (viewTypeExpr declaration.typeExpr)
 
 
 viewModuleDeclPath : Element msg -> ModuleDeclPath -> Element msg
@@ -1291,6 +1612,24 @@ viewLocation location =
                     viewHighlighted <| viewModuleDeclaration mDecl
             in
             viewModuleDeclPath viewed path
+
+        TypeExprLocation tExpr path ->
+            let
+                viewed =
+                    case tExpr of
+                        NameType s ->
+                            viewFocusedLeaf s
+            in
+            viewTypeExprPath viewed path
+
+        TypePatternLocation tPattern path ->
+            let
+                viewed =
+                    case tPattern of
+                        NameTypePattern s ->
+                            viewFocusedLeaf s
+            in
+            viewTypePatternPath viewed path
 
         ExprLocation expr path ->
             let
