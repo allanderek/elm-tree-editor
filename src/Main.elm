@@ -969,6 +969,142 @@ insertTypeDecl =
     }
 
 
+cutAction : Action
+cutAction =
+    let
+        updateState editorState =
+            case editorState.location of
+                ExprLocation expr path ->
+                    let
+                        buildPath left up right =
+                            case List.isEmpty left && List.isEmpty right of
+                                True ->
+                                    up
+
+                                False ->
+                                    ApplyPath left up right
+                    in
+                    case path of
+                        ApplyPath [] up [] ->
+                            -- This is an impossible state that we shouldn't get into, we could do some tricks
+                            -- for example we could update the location to `ExprLocation expr up` and then recursively
+                            -- call `updateState. That would introduce the possiblity of an infinite loop. We could
+                            -- alternatively fix up the current location, put that on the clipboard and carry on, so this
+                            -- cut action would act like a copy one, but also fix up the impossible state. That's nice, but
+                            -- let's just fail in an obvious way so that hopefully the underlying bug gets fixed.
+                            editorState
+
+                        ApplyPath (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation l <| buildPath left up right
+                            }
+
+                        ApplyPath [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation r <| buildPath [] up right
+                            }
+
+                        LetExpr _ _ ->
+                            -- You cannot cut the expression from a let.
+                            editorState
+
+                        DeclExpr _ _ ->
+                            -- You cannot cut the expression from a declaration.
+                            editorState
+
+                        ModuleDeclExpr _ _ ->
+                            -- You cannot cut the expression from a module declaration
+                            editorState
+
+                DeclLocation valueDecl path ->
+                    case path of
+                        LetDecl [] up [] expr ->
+                            -- Here you're cutting the very last declaration of a let, that's fine
+                            -- but it is now no longer a let expression.
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation expr up
+                            }
+
+                        LetDecl (l :: left) up right expr ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                DeclLocation l <|
+                                    LetDecl left up right expr
+                            }
+
+                        LetDecl [] up (r :: right) expr ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                DeclLocation r <|
+                                    LetDecl [] up right expr
+                            }
+
+                PatternLocation pattern path ->
+                    case path of
+                        DeclPattern _ _ ->
+                            editorState
+
+                        ModuleDeclPattern _ _ ->
+                            editorState
+
+                TypeExprLocation typeExpr path ->
+                    case path of
+                        ModuleDeclType _ _ ->
+                            editorState
+
+                TypePatternLocation typePattern path ->
+                    case path of
+                        ModuleDeclTypePattern _ _ ->
+                            editorState
+
+                ModuleDeclLocation moduleDecl path ->
+                    case path of
+                        ModuleDecl [] [] ->
+                            { clipBoard = Just editorState.location
+                            , location = ModuleLocation []
+                            }
+
+                        ModuleDecl (l :: left) right ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                ModuleDeclLocation l <|
+                                    ModuleDecl left right
+                            }
+
+                        ModuleDecl [] (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                ModuleDeclLocation r <|
+                                    ModuleDecl [] right
+                            }
+
+                ModuleLocation _ ->
+                    editorState
+    in
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
+    }
+
+
+copyAction : Action
+copyAction =
+    let
+        updateState editorState =
+            { editorState | clipBoard = Just editorState.location }
+    in
+    { updateState = updateState
+
+    -- We could just make this `always True` as it is always possible to perform
+    -- a copy. However, it is also very cheap to perform a copy, and the one time
+    -- we want to disable it, is if the current clipboard is equal to the current
+    -- location, since copying will have no effect, and this will be disabled.
+    -- However, we may find that users find this counter-intuitive, and wonder why
+    -- 'copy' is disabled. In other words  there may be less cognitive load in simply
+    -- performing the useless operation than in having them wonder why it is disabled.
+    , isAvailable = defaultIsAvailable updateState
+    }
+
+
 leafBoxId : String
 leafBoxId =
     "leaf-box"
@@ -1171,6 +1307,8 @@ header editorState =
         , makeButton moveRight "MoveRight"
         , makeButton insertTypeDecl "Declare type"
         , makeButton promoteLet "Let"
+        , makeButton cutAction "Cut"
+        , makeButton copyAction "Copy"
         ]
 
 
