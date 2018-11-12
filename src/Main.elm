@@ -214,108 +214,28 @@ type EditorAction
     | InsertTypeDecl
 
 
-leafBoxId : String
-leafBoxId =
-    "leaf-box"
+type alias Action =
+    { updateLocation : Location -> Location
+    , isAvailable : Location -> Bool
+    }
 
 
-focusLeafBox : Cmd Msg
-focusLeafBox =
-    Task.attempt (always NoOp) (Browser.Dom.focus leafBoxId)
+
+-- The default function for checking whether an action is available or not is just to apply the
+-- given update location function and see if the location has changed. Now this obviously may result
+-- in a fair amount of unnecessary work for certain actions, in which case we can simply provide a more
+-- sophisticated `isAvailable` function.
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
-    case msg of
-        LinkClicked urlRequest ->
-            let
-                command =
-                    case urlRequest of
-                        Browser.Internal url ->
-                            Nav.pushUrl model.key <| Url.toString url
-
-                        Browser.External href ->
-                            Nav.load href
-            in
-            ( model, command )
-
-        UrlChanged url ->
-            withCommands { model | url = url } []
-
-        NoOp ->
-            withCommands model []
-
-        EditorAction action ->
-            let
-                newModel =
-                    { model | location = updateLocation action model.location }
-
-                command =
-                    case newModel.location of
-                        ExprLocation (Leaf _) _ ->
-                            focusLeafBox
-
-                        PatternLocation (NamePattern _) _ ->
-                            focusLeafBox
-
-                        TypePatternLocation (NameTypePattern _) _ ->
-                            focusLeafBox
-
-                        TypeExprLocation (NameType _) _ ->
-                            focusLeafBox
-
-                        _ ->
-                            Cmd.none
-            in
-            ( newModel, command )
-
-        LeafInput content ->
-            let
-                newModel =
-                    case model.location of
-                        ExprLocation (Leaf _) path ->
-                            let
-                                newLocation =
-                                    ExprLocation (Leaf content) path
-                            in
-                            { model | location = newLocation }
-
-                        PatternLocation (NamePattern _) path ->
-                            let
-                                newLocation =
-                                    PatternLocation (NamePattern content) path
-                            in
-                            { model | location = newLocation }
-
-                        TypeExprLocation (NameType _) path ->
-                            let
-                                newLocation =
-                                    TypeExprLocation (NameType content) path
-                            in
-                            { model | location = newLocation }
-
-                        TypePatternLocation (NameTypePattern _) path ->
-                            let
-                                newLocation =
-                                    TypePatternLocation (NameTypePattern content) path
-                            in
-                            { model | location = newLocation }
-
-                        _ ->
-                            model
-            in
-            withCommands newModel []
+defaultIsAvailable : (Location -> Location) -> Location -> Bool
+defaultIsAvailable updateLocation location =
+    location == updateLocation location
 
 
-withCommands : model -> List (Cmd msg) -> ( model, Cmd msg )
-withCommands model commands =
-    ( model, Cmd.batch commands )
-
-
-updateLocation : EditorAction -> Location -> Location
-updateLocation action location =
-    case action of
-        GoLeft ->
+goLeft : Action
+goLeft =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation _ ->
                     location
@@ -374,8 +294,16 @@ updateLocation action location =
 
                         ModuleDecl (l :: left) right ->
                             ModuleDeclLocation l <| ModuleDecl left (mDecl :: right)
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
 
-        GoRight ->
+
+goRight : Action
+goRight =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation _ ->
                     location
@@ -430,8 +358,16 @@ updateLocation action location =
 
                         ModuleDeclExpr _ _ ->
                             location
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
 
-        GoUp ->
+
+goUp : Action
+goUp =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation _ ->
                     location
@@ -534,8 +470,16 @@ updateLocation action location =
                                     ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation mDecl up
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
 
-        GoDown ->
+
+goDown : Action
+goDown =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation [] ->
                     location
@@ -595,8 +539,16 @@ updateLocation action location =
 
                         Let (first :: rest) inExpr ->
                             DeclLocation first <| LetDecl [] up rest inExpr
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
 
-        InsertLeft ->
+
+insertLeft : Action
+insertLeft =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation _ ->
                     -- This is technically correct, but it's tempting to allow the insertion of
@@ -659,8 +611,16 @@ updateLocation action location =
 
                         ModuleDeclExpr _ _ ->
                             location
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
 
-        InsertRight ->
+
+insertRight : Action
+insertRight =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation _ ->
                     -- This is technically correct, but it's tempting to allow the insertion of
@@ -725,8 +685,64 @@ updateLocation action location =
 
                         ModuleDeclExpr _ _ ->
                             location
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
 
-        InsertTypeDecl ->
+
+promoteLet : Action
+promoteLet =
+    let
+        updateLocation location =
+            case location of
+                ModuleLocation _ ->
+                    location
+
+                ModuleDeclLocation _ _ ->
+                    location
+
+                TypePatternLocation tPattern path ->
+                    location
+
+                TypeExprLocation typeExpr path ->
+                    location
+
+                PatternLocation _ _ ->
+                    location
+
+                DeclLocation _ _ ->
+                    location
+
+                ExprLocation (Let _ _) _ ->
+                    location
+
+                ExprLocation expr path ->
+                    case path of
+                        LetExpr _ _ ->
+                            location
+
+                        _ ->
+                            let
+                                newDeclaration =
+                                    { pattern = NamePattern "n"
+                                    , expr = Leaf "3"
+                                    }
+
+                                newExpr =
+                                    Let [ newDeclaration ] expr
+                            in
+                            ExprLocation newExpr path
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
+
+
+insertTypeDecl : Action
+insertTypeDecl =
+    let
+        updateLocation location =
             case location of
                 ModuleLocation moduleDecls ->
                     -- TODO: We would be better to just go down first, and then insert the type declaration,
@@ -767,46 +783,139 @@ updateLocation action location =
 
                 ExprLocation expr path ->
                     location
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
+
+
+actionFromMessage : EditorAction -> Action
+actionFromMessage editorAction =
+    case editorAction of
+        GoLeft ->
+            goLeft
+
+        GoRight ->
+            goRight
+
+        GoUp ->
+            goUp
+
+        GoDown ->
+            goDown
+
+        InsertLeft ->
+            insertLeft
+
+        InsertRight ->
+            insertRight
 
         PromoteLet ->
-            case location of
-                ModuleLocation _ ->
-                    location
+            promoteLet
 
-                ModuleDeclLocation _ _ ->
-                    location
+        InsertTypeDecl ->
+            insertTypeDecl
 
-                TypePatternLocation tPattern path ->
-                    location
 
-                TypeExprLocation typeExpr path ->
-                    location
+leafBoxId : String
+leafBoxId =
+    "leaf-box"
 
-                PatternLocation _ _ ->
-                    location
 
-                DeclLocation _ _ ->
-                    location
+focusLeafBox : Cmd Msg
+focusLeafBox =
+    Task.attempt (always NoOp) (Browser.Dom.focus leafBoxId)
 
-                ExprLocation (Let _ _) _ ->
-                    location
 
-                ExprLocation expr path ->
-                    case path of
-                        LetExpr _ _ ->
-                            location
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        LinkClicked urlRequest ->
+            let
+                command =
+                    case urlRequest of
+                        Browser.Internal url ->
+                            Nav.pushUrl model.key <| Url.toString url
+
+                        Browser.External href ->
+                            Nav.load href
+            in
+            ( model, command )
+
+        UrlChanged url ->
+            withCommands { model | url = url } []
+
+        NoOp ->
+            withCommands model []
+
+        EditorAction editorAction ->
+            let
+                action =
+                    actionFromMessage editorAction
+
+                newModel =
+                    { model | location = action.updateLocation model.location }
+
+                command =
+                    case newModel.location of
+                        ExprLocation (Leaf _) _ ->
+                            focusLeafBox
+
+                        PatternLocation (NamePattern _) _ ->
+                            focusLeafBox
+
+                        TypePatternLocation (NameTypePattern _) _ ->
+                            focusLeafBox
+
+                        TypeExprLocation (NameType _) _ ->
+                            focusLeafBox
 
                         _ ->
-                            let
-                                newDeclaration =
-                                    { pattern = NamePattern "n"
-                                    , expr = Leaf "3"
-                                    }
+                            Cmd.none
+            in
+            ( newModel, command )
 
-                                newExpr =
-                                    Let [ newDeclaration ] expr
+        LeafInput content ->
+            let
+                newModel =
+                    case model.location of
+                        ExprLocation (Leaf _) path ->
+                            let
+                                newLocation =
+                                    ExprLocation (Leaf content) path
                             in
-                            ExprLocation newExpr path
+                            { model | location = newLocation }
+
+                        PatternLocation (NamePattern _) path ->
+                            let
+                                newLocation =
+                                    PatternLocation (NamePattern content) path
+                            in
+                            { model | location = newLocation }
+
+                        TypeExprLocation (NameType _) path ->
+                            let
+                                newLocation =
+                                    TypeExprLocation (NameType content) path
+                            in
+                            { model | location = newLocation }
+
+                        TypePatternLocation (NameTypePattern _) path ->
+                            let
+                                newLocation =
+                                    TypePatternLocation (NameTypePattern content) path
+                            in
+                            { model | location = newLocation }
+
+                        _ ->
+                            model
+            in
+            withCommands newModel []
+
+
+withCommands : model -> List (Cmd msg) -> ( model, Cmd msg )
+withCommands model commands =
+    ( model, Cmd.batch commands )
 
 
 
@@ -884,407 +993,30 @@ header location =
                 , label = text title
                 }
 
-        action =
-            Just << EditorAction
-
-        goUp =
+        makeButton editorAction title =
             let
-                title =
-                    "Up"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            Nothing
-
-                        TypePatternLocation _ _ ->
-                            action GoUp
-
-                        TypeExprLocation _ _ ->
-                            action GoUp
-
-                        ModuleDeclLocation _ _ ->
-                            action GoUp
-
-                        ExprLocation _ _ ->
-                            action GoUp
-
-                        PatternLocation _ _ ->
-                            action GoUp
-
-                        DeclLocation _ _ ->
-                            action GoUp
+                action =
+                    actionFromMessage editorAction
             in
-            button title mMessage
-
-        goDown =
-            let
-                title =
-                    "Down"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            action GoDown
-
-                        ModuleDeclLocation _ _ ->
-                            action GoDown
-
-                        TypePatternLocation tPattern _ ->
-                            case tPattern of
-                                NameTypePattern _ ->
-                                    Nothing
-
-                        TypeExprLocation tExpr _ ->
-                            case tExpr of
-                                NameType _ ->
-                                    Nothing
-
-                        ExprLocation expr _ ->
-                            case expr of
-                                Leaf _ ->
-                                    Nothing
-
-                                Apply _ ->
-                                    action GoDown
-
-                                Let _ _ ->
-                                    action GoDown
-
-                        PatternLocation pattern _ ->
-                            case pattern of
-                                NamePattern _ ->
-                                    Nothing
-
-                        DeclLocation _ _ ->
-                            action GoDown
-            in
-            button title mMessage
-
-        goLeft =
-            let
-                title =
-                    "Left"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            Nothing
-
-                        ModuleDeclLocation mDecl path ->
-                            case path of
-                                ModuleDecl [] _ ->
-                                    Nothing
-
-                                ModuleDecl (_ :: _) _ ->
-                                    action GoLeft
-
-                        TypePatternLocation _ path ->
-                            case path of
-                                ModuleDeclTypePattern _ _ ->
-                                    Nothing
-
-                        TypeExprLocation _ path ->
-                            case path of
-                                ModuleDeclType _ _ ->
-                                    action GoLeft
-
-                        ExprLocation _ path ->
-                            case path of
-                                ApplyPath [] _ _ ->
-                                    Nothing
-
-                                ApplyPath (_ :: _) _ _ ->
-                                    action GoLeft
-
-                                LetExpr [] _ ->
-                                    Nothing
-
-                                LetExpr (_ :: _) _ ->
-                                    action GoLeft
-
-                                DeclExpr _ _ ->
-                                    action GoLeft
-
-                                ModuleDeclExpr _ _ ->
-                                    action GoLeft
-
-                        PatternLocation _ path ->
-                            case path of
-                                DeclPattern _ _ ->
-                                    Nothing
-
-                                ModuleDeclPattern _ _ ->
-                                    Nothing
-
-                        DeclLocation _ path ->
-                            case path of
-                                LetDecl [] _ _ _ ->
-                                    Nothing
-
-                                LetDecl (_ :: _) _ _ _ ->
-                                    action GoLeft
-            in
-            button title mMessage
-
-        goRight =
-            let
-                title =
-                    "Right"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            Nothing
-
-                        ModuleDeclLocation _ path ->
-                            case path of
-                                ModuleDecl _ [] ->
-                                    Nothing
-
-                                ModuleDecl _ (_ :: _) ->
-                                    action GoRight
-
-                        TypePatternLocation _ path ->
-                            case path of
-                                ModuleDeclTypePattern _ _ ->
-                                    action GoRight
-
-                        TypeExprLocation _ path ->
-                            case path of
-                                ModuleDeclType _ _ ->
-                                    Nothing
-
-                        ExprLocation _ path ->
-                            case path of
-                                ApplyPath _ _ [] ->
-                                    Nothing
-
-                                ApplyPath _ _ (_ :: _) ->
-                                    action GoRight
-
-                                LetExpr _ _ ->
-                                    Nothing
-
-                                DeclExpr _ _ ->
-                                    Nothing
-
-                                ModuleDeclExpr _ _ ->
-                                    Nothing
-
-                        PatternLocation _ path ->
-                            case path of
-                                DeclPattern _ _ ->
-                                    action GoRight
-
-                                ModuleDeclPattern _ _ ->
-                                    action GoRight
-
-                        DeclLocation _ path ->
-                            case path of
-                                LetDecl _ _ _ _ ->
-                                    action GoRight
-            in
-            button title mMessage
-
-        insertLeft =
-            let
-                title =
-                    "InsertLeft"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            Nothing
-
-                        ModuleDeclLocation _ path ->
-                            case path of
-                                ModuleDecl _ _ ->
-                                    action InsertLeft
-
-                        TypePatternLocation _ path ->
-                            case path of
-                                ModuleDeclTypePattern _ _ ->
-                                    Nothing
-
-                        TypeExprLocation _ path ->
-                            case path of
-                                ModuleDeclType _ _ ->
-                                    Nothing
-
-                        ExprLocation _ path ->
-                            case path of
-                                ApplyPath _ _ _ ->
-                                    action InsertLeft
-
-                                LetExpr _ _ ->
-                                    action InsertLeft
-
-                                DeclExpr _ _ ->
-                                    Nothing
-
-                                ModuleDeclExpr _ _ ->
-                                    Nothing
-
-                        PatternLocation _ path ->
-                            case path of
-                                DeclPattern _ _ ->
-                                    Nothing
-
-                                ModuleDeclPattern _ _ ->
-                                    Nothing
-
-                        DeclLocation _ path ->
-                            case path of
-                                LetDecl _ _ _ _ ->
-                                    action InsertLeft
-            in
-            button title mMessage
-
-        insertRight =
-            let
-                title =
-                    "InsertRight"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            Nothing
-
-                        ModuleDeclLocation _ _ ->
-                            action InsertRight
-
-                        TypePatternLocation _ path ->
-                            case path of
-                                ModuleDeclTypePattern _ _ ->
-                                    Nothing
-
-                        TypeExprLocation _ path ->
-                            case path of
-                                ModuleDeclType _ _ ->
-                                    Nothing
-
-                        ExprLocation _ path ->
-                            case path of
-                                ApplyPath _ _ _ ->
-                                    action InsertRight
-
-                                LetExpr _ _ ->
-                                    Nothing
-
-                                DeclExpr _ _ ->
-                                    Nothing
-
-                                ModuleDeclExpr _ _ ->
-                                    Nothing
-
-                        PatternLocation _ path ->
-                            case path of
-                                DeclPattern _ _ ->
-                                    Nothing
-
-                                ModuleDeclPattern _ _ ->
-                                    Nothing
-
-                        DeclLocation _ path ->
-                            case path of
-                                LetDecl _ _ _ _ ->
-                                    action InsertRight
-            in
-            button title mMessage
-
-        insertTypeDecl =
-            let
-                title =
-                    "Insert type"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            action InsertTypeDecl
-
-                        ModuleDeclLocation _ _ ->
-                            action InsertTypeDecl
-
-                        -- As noted in the definition of the update for InsertTypeDecl all of these
-                        -- other cases *could* absolutely accept the 'insert type declaration' you just
-                        -- need to go up until you get to a module declaration.
-                        TypePatternLocation _ path ->
-                            Nothing
-
-                        TypeExprLocation _ path ->
-                            Nothing
-
-                        ExprLocation expr path ->
-                            Nothing
-
-                        PatternLocation _ _ ->
-                            Nothing
-
-                        DeclLocation _ _ ->
-                            Nothing
-            in
-            button title mMessage
-
-        promoteLet =
-            let
-                title =
-                    "Let"
-
-                mMessage =
-                    case location of
-                        ModuleLocation _ ->
-                            Nothing
-
-                        ModuleDeclLocation _ _ ->
-                            Nothing
-
-                        TypePatternLocation _ path ->
-                            case path of
-                                ModuleDeclTypePattern _ _ ->
-                                    Nothing
-
-                        TypeExprLocation _ path ->
-                            case path of
-                                ModuleDeclType _ _ ->
-                                    Nothing
-
-                        ExprLocation expr path ->
-                            case path of
-                                LetExpr _ _ ->
-                                    Nothing
-
-                                _ ->
-                                    case expr of
-                                        Let _ _ ->
-                                            Nothing
-
-                                        Leaf _ ->
-                                            action PromoteLet
-
-                                        Apply _ ->
-                                            action PromoteLet
-
-                        PatternLocation _ _ ->
-                            Nothing
-
-                        DeclLocation _ _ ->
-                            Nothing
-            in
-            button title mMessage
+            case action.isAvailable location of
+                True ->
+                    button title <| Just (EditorAction editorAction)
+
+                False ->
+                    button title Nothing
     in
     Element.wrappedRow
         [ Element.width Element.fill
         , Element.spaceEvenly
         ]
-        [ goUp
-        , goDown
-        , goLeft
-        , goRight
-        , insertLeft
-        , insertRight
-        , insertTypeDecl
-        , promoteLet
+        [ makeButton GoUp "Up"
+        , makeButton GoDown "Down"
+        , makeButton GoLeft "Left"
+        , makeButton GoRight "Right"
+        , makeButton InsertLeft "InsertLeft"
+        , makeButton InsertRight "InsertRight"
+        , makeButton InsertTypeDecl "Declare type"
+        , makeButton PromoteLet "Let"
         ]
 
 
