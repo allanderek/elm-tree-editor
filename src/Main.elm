@@ -749,6 +749,70 @@ moveLeft =
     }
 
 
+moveRight : Action
+moveRight =
+    let
+        updateLocation location =
+            case location of
+                ModuleLocation _ ->
+                    location
+
+                ModuleDeclLocation moduleDecl path ->
+                    case path of
+                        ModuleDecl _ [] ->
+                            location
+
+                        ModuleDecl left (r :: right) ->
+                            ModuleDeclLocation moduleDecl <| ModuleDecl (r :: left) right
+
+                TypeExprLocation typeExpr path ->
+                    case path of
+                        ModuleDeclType tPattern mDeclPath ->
+                            location
+
+                TypePatternLocation tPattern path ->
+                    case path of
+                        ModuleDeclTypePattern up typeExpr ->
+                            location
+
+                PatternLocation pattern path ->
+                    case path of
+                        DeclPattern up expr ->
+                            location
+
+                        ModuleDeclPattern up expr ->
+                            location
+
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl left up [] expr ->
+                            location
+
+                        LetDecl left up (r :: right) expr ->
+                            DeclLocation declaration <| LetDecl (r :: left) up right expr
+
+                ExprLocation expr path ->
+                    case path of
+                        ApplyPath _ _ [] ->
+                            location
+
+                        ApplyPath left up (r :: right) ->
+                            ExprLocation expr <| ApplyPath (r :: left) up right
+
+                        LetExpr _ _ ->
+                            location
+
+                        DeclExpr _ _ ->
+                            location
+
+                        ModuleDeclExpr _ _ ->
+                            location
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
+
+
 promoteLet : Action
 promoteLet =
     let
@@ -1039,6 +1103,7 @@ header location =
         , makeButton insertLeft "InsertLeft"
         , makeButton insertRight "InsertRight"
         , makeButton moveLeft "MoveLeft"
+        , makeButton moveRight "MoveRight"
         , makeButton insertTypeDecl "Declare type"
         , makeButton promoteLet "Let"
         ]
