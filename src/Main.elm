@@ -78,8 +78,26 @@ type alias ProgramFlags =
 type alias Model =
     { key : Nav.Key
     , url : Url.Url
-    , location : Location
+    , editorState : EditorState
     }
+
+
+type alias EditorState =
+    { location : Location
+    , clipBoard : Maybe Fragment
+    }
+
+
+
+-- A fragment is *really* just the 'hole' part of the location, so in other words
+-- we never need to worry about the path contained within a fragment. It is
+-- therefore tempting to make a separate type. We'll see how this plays out
+-- but if we ever find ourselves with a bug because of this we should just make
+-- type Fragment = ExprFragment Expr | ...
+
+
+type alias Fragment =
+    Location
 
 
 type Expr
@@ -186,7 +204,12 @@ init () url key =
         initialModel =
             { key = key
             , url = url
-            , location = initialLocation
+            , editorState = initialState
+            }
+
+        initialState =
+            { location = initialLocation
+            , clipBoard = Nothing
             }
 
         initialCommand =
@@ -204,8 +227,8 @@ type Msg
 
 
 type alias Action =
-    { updateLocation : Location -> Location
-    , isAvailable : Location -> Bool
+    { updateState : EditorState -> EditorState
+    , isAvailable : EditorState -> Bool
     }
 
 
@@ -216,9 +239,14 @@ type alias Action =
 -- sophisticated `isAvailable` function.
 
 
-defaultIsAvailable : (Location -> Location) -> Location -> Bool
-defaultIsAvailable updateLocation location =
-    location /= updateLocation location
+defaultIsAvailable : (EditorState -> EditorState) -> EditorState -> Bool
+defaultIsAvailable updateState state =
+    state /= updateState state
+
+
+updateStateLocation : (Location -> Location) -> EditorState -> EditorState
+updateStateLocation f state =
+    { state | location = f state.location }
 
 
 goLeft : Action
@@ -283,9 +311,12 @@ goLeft =
 
                         ModuleDecl (l :: left) right ->
                             ModuleDeclLocation l <| ModuleDecl left (mDecl :: right)
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -347,9 +378,12 @@ goRight =
 
                         ModuleDeclExpr _ _ ->
                             location
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -459,9 +493,12 @@ goUp =
                                     ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation mDecl up
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -528,9 +565,12 @@ goDown =
 
                         Let (first :: rest) inExpr ->
                             DeclLocation first <| LetDecl [] up rest inExpr
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -600,9 +640,12 @@ insertLeft =
 
                         ModuleDeclExpr _ _ ->
                             location
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -674,9 +717,12 @@ insertRight =
 
                         ModuleDeclExpr _ _ ->
                             location
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -743,9 +789,12 @@ moveLeft =
 
                         ModuleDecl (l :: left) right ->
                             ModuleDeclLocation moduleDecl <| ModuleDecl left (l :: right)
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -807,9 +856,12 @@ moveRight =
 
                         ModuleDeclExpr _ _ ->
                             location
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -855,9 +907,12 @@ promoteLet =
                                     Let [ newDeclaration ] expr
                             in
                             ExprLocation newExpr path
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -905,9 +960,12 @@ insertTypeDecl =
 
                 ExprLocation expr path ->
                     location
+
+        updateState =
+            updateStateLocation updateLocation
     in
-    { updateLocation = updateLocation
-    , isAvailable = defaultIsAvailable updateLocation
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
     }
 
 
@@ -945,10 +1003,10 @@ update msg model =
         EditorAction editorAction ->
             let
                 newModel =
-                    { model | location = editorAction.updateLocation model.location }
+                    { model | editorState = editorAction.updateState model.editorState }
 
                 command =
-                    case newModel.location of
+                    case newModel.editorState.location of
                         ExprLocation (Leaf _) _ ->
                             focusLeafBox
 
@@ -968,37 +1026,44 @@ update msg model =
 
         LeafInput content ->
             let
+                updateLocation l =
+                    let
+                        editorState =
+                            model.editorState
+
+                        newState =
+                            { editorState | location = l }
+                    in
+                    { model | editorState = newState }
+
                 newModel =
-                    case model.location of
+                    case model.editorState.location of
                         ExprLocation (Leaf _) path ->
-                            let
-                                newLocation =
-                                    ExprLocation (Leaf content) path
-                            in
-                            { model | location = newLocation }
+                            updateLocation <|
+                                ExprLocation (Leaf content) path
 
                         PatternLocation (NamePattern _) path ->
-                            let
-                                newLocation =
-                                    PatternLocation (NamePattern content) path
-                            in
-                            { model | location = newLocation }
+                            updateLocation <|
+                                PatternLocation (NamePattern content) path
 
                         TypeExprLocation (NameType _) path ->
-                            let
-                                newLocation =
-                                    TypeExprLocation (NameType content) path
-                            in
-                            { model | location = newLocation }
+                            updateLocation <|
+                                TypeExprLocation (NameType content) path
 
                         TypePatternLocation (NameTypePattern _) path ->
-                            let
-                                newLocation =
-                                    TypePatternLocation (NameTypePattern content) path
-                            in
-                            { model | location = newLocation }
+                            updateLocation <|
+                                TypePatternLocation (NameTypePattern content) path
 
-                        _ ->
+                        ExprLocation _ _ ->
+                            model
+
+                        DeclLocation _ _ ->
+                            model
+
+                        ModuleDeclLocation _ _ ->
+                            model
+
+                        ModuleLocation _ ->
                             model
             in
             withCommands newModel []
@@ -1030,8 +1095,8 @@ view model =
                 , Element.spacing 10
                 , Element.padding 10
                 ]
-                [ header model.location
-                , viewLocation model.location
+                [ header model.editorState
+                , viewLocation model.editorState.location
                 ]
     in
     { title = "Tree source editing with Elm"
@@ -1059,8 +1124,8 @@ themeColor4 =
     Element.rgb255 125 53 26
 
 
-header : Location -> Element Msg
-header location =
+header : EditorState -> Element Msg
+header editorState =
     let
         button title mMsg =
             let
@@ -1085,7 +1150,7 @@ header location =
                 }
 
         makeButton editorAction title =
-            case editorAction.isAvailable location of
+            case editorAction.isAvailable editorState of
                 True ->
                     button title <| Just (EditorAction editorAction)
 
