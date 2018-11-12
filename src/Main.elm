@@ -50,20 +50,20 @@ keySubscription =
             in
             Decode.map toMsg <| Decode.field "key" Decode.string
 
-        keyToEditorAction : String -> Maybe EditorAction
+        keyToEditorAction : String -> Maybe Action
         keyToEditorAction string =
             case string of
                 "ArrowLeft" ->
-                    Just GoLeft
+                    Just goLeft
 
                 "ArrowRight" ->
-                    Just GoRight
+                    Just goRight
 
                 "ArrowUp" ->
-                    Just GoUp
+                    Just goUp
 
                 "ArrowDown" ->
-                    Just GoDown
+                    Just goDown
 
                 _ ->
                     Nothing
@@ -198,21 +198,9 @@ init () url key =
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
-    | EditorAction EditorAction
+    | EditorAction Action
     | LeafInput String
     | NoOp
-
-
-type EditorAction
-    = GoLeft
-    | GoRight
-    | GoUp
-    | GoDown
-    | InsertLeft
-    | InsertRight
-    | MoveLeft
-    | PromoteLet
-    | InsertTypeDecl
 
 
 type alias Action =
@@ -859,37 +847,6 @@ insertTypeDecl =
     }
 
 
-actionFromMessage : EditorAction -> Action
-actionFromMessage editorAction =
-    case editorAction of
-        GoLeft ->
-            goLeft
-
-        GoRight ->
-            goRight
-
-        GoUp ->
-            goUp
-
-        GoDown ->
-            goDown
-
-        InsertLeft ->
-            insertLeft
-
-        InsertRight ->
-            insertRight
-
-        MoveLeft ->
-            moveLeft
-
-        PromoteLet ->
-            promoteLet
-
-        InsertTypeDecl ->
-            insertTypeDecl
-
-
 leafBoxId : String
 leafBoxId =
     "leaf-box"
@@ -923,11 +880,8 @@ update msg model =
 
         EditorAction editorAction ->
             let
-                action =
-                    actionFromMessage editorAction
-
                 newModel =
-                    { model | location = action.updateLocation model.location }
+                    { model | location = editorAction.updateLocation model.location }
 
                 command =
                     case newModel.location of
@@ -1067,11 +1021,7 @@ header location =
                 }
 
         makeButton editorAction title =
-            let
-                action =
-                    actionFromMessage editorAction
-            in
-            case action.isAvailable location of
+            case editorAction.isAvailable location of
                 True ->
                     button title <| Just (EditorAction editorAction)
 
@@ -1082,15 +1032,15 @@ header location =
         [ Element.width Element.fill
         , Element.spaceEvenly
         ]
-        [ makeButton GoUp "Up"
-        , makeButton GoDown "Down"
-        , makeButton GoLeft "Left"
-        , makeButton GoRight "Right"
-        , makeButton InsertLeft "InsertLeft"
-        , makeButton InsertRight "InsertRight"
-        , makeButton MoveLeft "MoveLeft"
-        , makeButton InsertTypeDecl "Declare type"
-        , makeButton PromoteLet "Let"
+        [ makeButton goUp "Up"
+        , makeButton goDown "Down"
+        , makeButton goLeft "Left"
+        , makeButton goRight "Right"
+        , makeButton insertLeft "InsertLeft"
+        , makeButton insertRight "InsertRight"
+        , makeButton moveLeft "MoveLeft"
+        , makeButton insertTypeDecl "Declare type"
+        , makeButton promoteLet "Let"
         ]
 
 
