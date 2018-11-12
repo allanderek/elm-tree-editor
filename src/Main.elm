@@ -210,6 +210,7 @@ type EditorAction
     | GoDown
     | InsertLeft
     | InsertRight
+    | MoveLeft
     | PromoteLet
     | InsertTypeDecl
 
@@ -229,7 +230,7 @@ type alias Action =
 
 defaultIsAvailable : (Location -> Location) -> Location -> Bool
 defaultIsAvailable updateLocation location =
-    location == updateLocation location
+    location /= updateLocation location
 
 
 goLeft : Action
@@ -691,6 +692,75 @@ insertRight =
     }
 
 
+moveLeft : Action
+moveLeft =
+    let
+        updateLocation location =
+            case location of
+                ModuleLocation _ ->
+                    location
+
+                ExprLocation expr path ->
+                    case path of
+                        ApplyPath [] _ _ ->
+                            location
+
+                        ApplyPath (l :: left) up right ->
+                            ExprLocation expr <|
+                                ApplyPath left up (l :: right)
+
+                        LetExpr [] _ ->
+                            location
+
+                        LetExpr (l :: left) up ->
+                            location
+
+                        DeclExpr pattern up ->
+                            location
+
+                        ModuleDeclExpr pattern up ->
+                            location
+
+                DeclLocation declaration path ->
+                    case path of
+                        LetDecl [] _ _ _ ->
+                            location
+
+                        LetDecl (l :: left) up right expr ->
+                            DeclLocation declaration <|
+                                LetDecl left up (l :: right) expr
+
+                PatternLocation pattern path ->
+                    case path of
+                        DeclPattern _ _ ->
+                            location
+
+                        ModuleDeclPattern _ _ ->
+                            location
+
+                TypeExprLocation typeExpr path ->
+                    case path of
+                        ModuleDeclType tPattern mDeclPath ->
+                            location
+
+                TypePatternLocation _ path ->
+                    case path of
+                        ModuleDeclTypePattern _ _ ->
+                            location
+
+                ModuleDeclLocation moduleDecl path ->
+                    case path of
+                        ModuleDecl [] _ ->
+                            location
+
+                        ModuleDecl (l :: left) right ->
+                            ModuleDeclLocation moduleDecl <| ModuleDecl left (l :: right)
+    in
+    { updateLocation = updateLocation
+    , isAvailable = defaultIsAvailable updateLocation
+    }
+
+
 promoteLet : Action
 promoteLet =
     let
@@ -809,6 +879,9 @@ actionFromMessage editorAction =
 
         InsertRight ->
             insertRight
+
+        MoveLeft ->
+            moveLeft
 
         PromoteLet ->
             promoteLet
@@ -1015,6 +1088,7 @@ header location =
         , makeButton GoRight "Right"
         , makeButton InsertLeft "InsertLeft"
         , makeButton InsertRight "InsertRight"
+        , makeButton MoveLeft "MoveLeft"
         , makeButton InsertTypeDecl "Declare type"
         , makeButton PromoteLet "Let"
         ]
