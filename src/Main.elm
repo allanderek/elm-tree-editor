@@ -1105,6 +1105,67 @@ copyAction =
     }
 
 
+pasteAction : Action
+pasteAction =
+    let
+        updateState editorState =
+            case editorState.clipBoard of
+                Nothing ->
+                    editorState
+
+                Just clipBoard ->
+                    case ( editorState.location, clipBoard ) of
+                        ( ExprLocation _ path, ExprLocation expr _ ) ->
+                            { editorState
+                                | location = ExprLocation expr path
+                            }
+
+                        ( DeclLocation _ path, DeclLocation valueDecl _ ) ->
+                            { editorState
+                                | location = DeclLocation valueDecl path
+                            }
+
+                        ( PatternLocation _ path, PatternLocation pattern _ ) ->
+                            { editorState
+                                | location = PatternLocation pattern path
+                            }
+
+                        ( TypeExprLocation _ path, TypeExprLocation typeExpr _ ) ->
+                            { editorState
+                                | location = TypeExprLocation typeExpr path
+                            }
+
+                        ( TypePatternLocation _ path, TypePatternLocation typePattern _ ) ->
+                            { editorState
+                                | location = TypePatternLocation typePattern path
+                            }
+
+                        ( ModuleDeclLocation _ path, ModuleDeclLocation moduleDeclaration _ ) ->
+                            { editorState
+                                | location = ModuleDeclLocation moduleDeclaration path
+                            }
+
+                        ( ModuleLocation _, ModuleLocation moduleExpr ) ->
+                            { editorState
+                                | location = ModuleLocation moduleExpr
+                            }
+
+                        _ ->
+                            editorState
+    in
+    { updateState = updateState
+
+    -- We could just make this `always True` as it is always possible to perform
+    -- a copy. However, it is also very cheap to perform a copy, and the one time
+    -- we want to disable it, is if the current clipboard is equal to the current
+    -- location, since copying will have no effect, and this will be disabled.
+    -- However, we may find that users find this counter-intuitive, and wonder why
+    -- 'copy' is disabled. In other words  there may be less cognitive load in simply
+    -- performing the useless operation than in having them wonder why it is disabled.
+    , isAvailable = defaultIsAvailable updateState
+    }
+
+
 leafBoxId : String
 leafBoxId =
     "leaf-box"
@@ -1309,6 +1370,7 @@ header editorState =
         , makeButton promoteLet "Let"
         , makeButton cutAction "Cut"
         , makeButton copyAction "Copy"
+        , makeButton pasteAction "Paste"
         ]
 
 
