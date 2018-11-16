@@ -114,6 +114,7 @@ type alias ValueDeclaration =
 
 type Pattern
     = NamePattern String
+    | ApplyPattern (List Pattern)
 
 
 type ExprPath
@@ -132,7 +133,8 @@ type ModuleDeclPath
 
 
 type PatternPath
-    = DeclPattern DeclPath Expr
+    = ApplyPatternPath (List Pattern) PatternPath (List Pattern)
+    | DeclPattern DeclPath Expr
     | ModuleDeclPattern ModuleDeclPath Expr
 
 
@@ -182,7 +184,7 @@ initialLocation =
     let
         expr =
             Let
-                [ { pattern = NamePattern "a", expr = Leaf "1" }
+                [ { pattern = ApplyPattern [ NamePattern "Just", NamePattern "a" ], expr = Apply [ Leaf "Just", Leaf "1" ] }
                 , { pattern = NamePattern "b", expr = Leaf "2" }
                 , { pattern = NamePattern "c", expr = Leaf "3" }
                 , { pattern = NamePattern "d", expr = Leaf "4" }
@@ -287,6 +289,12 @@ goLeft =
 
                 PatternLocation pattern path ->
                     case path of
+                        ApplyPatternPath [] _ _ ->
+                            location
+
+                        ApplyPatternPath (l :: left) up right ->
+                            PatternLocation l <| ApplyPatternPath left up (pattern :: right)
+
                         DeclPattern _ _ ->
                             location
 
@@ -348,6 +356,12 @@ goRight =
 
                 PatternLocation pattern path ->
                     case path of
+                        ApplyPatternPath _ _ [] ->
+                            location
+
+                        ApplyPatternPath left up (r :: right) ->
+                            PatternLocation r <| ApplyPatternPath (pattern :: left) up right
+
                         DeclPattern up expr ->
                             ExprLocation expr <| DeclExpr pattern up
 
@@ -424,6 +438,13 @@ goUp =
 
                 PatternLocation pattern path ->
                     case path of
+                        ApplyPatternPath left up right ->
+                            let
+                                newPattern =
+                                    ApplyPattern <| upList left pattern right
+                            in
+                            PatternLocation newPattern up
+
                         DeclPattern up expr ->
                             let
                                 declaration =
@@ -538,6 +559,13 @@ goDown =
                         NamePattern _ ->
                             location
 
+                        ApplyPattern [] ->
+                            location
+
+                        ApplyPattern (first :: rest) ->
+                            PatternLocation first <|
+                                ApplyPatternPath [] up rest
+
                 DeclLocation declaration up ->
                     -- Note this is a break from convention we're going into the expression
                     -- which is kind of not the first child of the declaration, but my argument is
@@ -605,8 +633,17 @@ insertLeft =
                 TypeExprLocation typeExpr path ->
                     location
 
-                PatternLocation _ _ ->
-                    location
+                PatternLocation pattern path ->
+                    case path of
+                        ApplyPatternPath left up right ->
+                            PatternLocation (NamePattern "L") <|
+                                ApplyPatternPath left up (pattern :: right)
+
+                        DeclPattern _ _ ->
+                            location
+
+                        ModuleDeclPattern _ _ ->
+                            location
 
                 DeclLocation declaration path ->
                     case path of
@@ -680,8 +717,17 @@ insertRight =
                 TypeExprLocation typeExpr path ->
                     location
 
-                PatternLocation _ _ ->
-                    location
+                PatternLocation pattern path ->
+                    case path of
+                        ApplyPatternPath left up right ->
+                            PatternLocation (NamePattern "R") <|
+                                ApplyPatternPath (pattern :: left) up right
+
+                        DeclPattern _ _ ->
+                            location
+
+                        ModuleDeclPattern _ _ ->
+                            location
 
                 DeclLocation declaration path ->
                     case path of
@@ -766,6 +812,13 @@ moveLeft =
 
                 PatternLocation pattern path ->
                     case path of
+                        ApplyPatternPath [] _ _ ->
+                            location
+
+                        ApplyPatternPath (l :: left) up right ->
+                            PatternLocation pattern <|
+                                ApplyPatternPath left up (l :: right)
+
                         DeclPattern _ _ ->
                             location
 
@@ -826,6 +879,13 @@ moveRight =
 
                 PatternLocation pattern path ->
                     case path of
+                        ApplyPatternPath _ _ [] ->
+                            location
+
+                        ApplyPatternPath left up (r :: right) ->
+                            PatternLocation pattern <|
+                                ApplyPatternPath (r :: left) up right
+
                         DeclPattern up expr ->
                             location
 
@@ -1041,6 +1101,22 @@ cutAction =
 
                 PatternLocation pattern path ->
                     case path of
+                        ApplyPatternPath [] _ [] ->
+                            -- An impossible state that we shouldn't get into see ApplyPath above.
+                            editorState
+
+                        ApplyPatternPath (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                PatternLocation l <| ApplyPatternPath left up right
+                            }
+
+                        ApplyPatternPath [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                PatternLocation r <| ApplyPatternPath [] up right
+                            }
+
                         DeclPattern _ _ ->
                             editorState
 
@@ -1252,6 +1328,9 @@ update msg model =
                                 TypePatternLocation (NameTypePattern content) path
 
                         ExprLocation _ _ ->
+                            model
+
+                        PatternLocation _ _ ->
                             model
 
                         DeclLocation _ _ ->
@@ -1470,6 +1549,9 @@ viewPattern pattern =
         NamePattern s ->
             text s
 
+        ApplyPattern patterns ->
+            viewApply <| List.map viewPattern patterns
+
 
 viewApply : List (Element msg) -> Element msg
 viewApply =
@@ -1549,6 +1631,22 @@ viewDeclPath viewed path =
 viewPatternPath : Element msg -> PatternPath -> Element msg
 viewPatternPath viewed path =
     case path of
+        ApplyPatternPath left up right ->
+            let
+                leftViewed =
+                    List.map viewPattern left
+
+                rightViewed =
+                    List.map viewPattern right
+
+                children =
+                    upList leftViewed viewed rightViewed
+
+                child =
+                    viewApply children
+            in
+            viewPatternPath child up
+
         DeclPattern up expr ->
             let
                 child =
@@ -1745,6 +1843,9 @@ viewLocation location =
                     case pattern of
                         NamePattern s ->
                             viewFocusedLeaf s
+
+                        _ ->
+                            viewHighlighted <| viewPattern pattern
             in
             viewPatternPath viewed path
 
