@@ -1481,7 +1481,9 @@ indentElement =
 viewKeyword : String -> Element msg
 viewKeyword word =
     el
-        [ Font.color themeColor1 ]
+        [ Font.color themeColor1
+        , Font.bold
+        ]
         (text word)
 
 
