@@ -129,7 +129,19 @@ type DeclPath
 
 
 type ModuleDeclPath
-    = ModuleDecl (List ModuleDeclaration) (List ModuleDeclaration)
+    = ModuleDecl ModuleName (List Export) (List Import) (List ModuleDeclaration) (List ModuleDeclaration)
+
+
+type ModuleImportPath
+    = ModuleImportPath ModuleName (List Export) (List Import) (List Import) (List ModuleDeclaration)
+
+
+type ModuleExportPath
+    = ModuleExportPath ModuleName (List Export) (List Export) (List Import) (List ModuleDeclaration)
+
+
+type ModuleNamePath
+    = ModuleNamePath (List Export) (List Import) (List ModuleDeclaration)
 
 
 type PatternPath
@@ -165,8 +177,31 @@ type TypeExprPath
     = ModuleDeclType TypePattern ModuleDeclPath
 
 
+type alias Export =
+    { name : String
+    , exportConstructors : Bool
+    }
+
+
+
+-- TODO: Obviously should be more complicated than this, in particular can have an 'as' clause
+-- and can have an exposing clause.
+
+
+type alias Import =
+    String
+
+
+type alias ModuleName =
+    String
+
+
 type alias Module =
-    List ModuleDeclaration
+    { name : ModuleName
+    , exports : List Export
+    , imports : List Import
+    , declarations : List ModuleDeclaration
+    }
 
 
 type Location
@@ -175,6 +210,9 @@ type Location
     | PatternLocation Pattern PatternPath
     | TypeExprLocation TypeExpr TypeExprPath
     | TypePatternLocation TypePattern TypePatternPath
+    | ModuleImportLocation Import ModuleImportPath
+    | ModuleExportLocation Export ModuleExportPath
+    | ModuleNameLocation ModuleName ModuleNamePath
     | ModuleDeclLocation ModuleDeclaration ModuleDeclPath
     | ModuleLocation Module
 
@@ -196,8 +234,15 @@ initialLocation =
 
         typeDecl =
             ModuleTypeDeclaration { pattern = NameTypePattern "Person", typeExpr = NameType "String" }
+
+        moduleTerm =
+            { name = "Main"
+            , exports = [ { name = "main", exportConstructors = False } ]
+            , imports = [ "Html", "Html.Attributes", "Html.Events" ]
+            , declarations = [ typeDecl, moduleDecl ]
+            }
     in
-    ModuleLocation [ typeDecl, moduleDecl ]
+    ModuleLocation moduleTerm
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -259,6 +304,16 @@ goLeft =
                 ModuleLocation _ ->
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ExprLocation expr path ->
                     case path of
                         ApplyPath [] _ _ ->
@@ -314,11 +369,17 @@ goLeft =
 
                 ModuleDeclLocation mDecl path ->
                     case path of
-                        ModuleDecl [] _ ->
-                            location
+                        ModuleDecl moduleName [] [] [] right ->
+                            ModuleNameLocation moduleName <| ModuleNamePath [] [] (mDecl :: right)
 
-                        ModuleDecl (l :: left) right ->
-                            ModuleDeclLocation l <| ModuleDecl left (mDecl :: right)
+                        ModuleDecl moduleName (e :: exports) [] [] right ->
+                            ModuleExportLocation e <| ModuleExportPath moduleName exports [] [] (mDecl :: right)
+
+                        ModuleDecl moduleName exports (i :: imports) [] right ->
+                            ModuleImportLocation i <| ModuleImportPath moduleName exports imports [] (mDecl :: right)
+
+                        ModuleDecl moduleName exports imports (l :: left) right ->
+                            ModuleDeclLocation l <| ModuleDecl moduleName exports imports left (mDecl :: right)
 
         updateState =
             updateStateLocation updateLocation
@@ -336,13 +397,23 @@ goRight =
                 ModuleLocation _ ->
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ModuleDeclLocation mDecl path ->
                     case path of
-                        ModuleDecl _ [] ->
+                        ModuleDecl _ _ _ _ [] ->
                             location
 
-                        ModuleDecl left (r :: right) ->
-                            ModuleDeclLocation r <| ModuleDecl (mDecl :: left) right
+                        ModuleDecl moduleName exports imports left (r :: right) ->
+                            ModuleDeclLocation r <| ModuleDecl moduleName exports imports (mDecl :: left) right
 
                 TypeExprLocation typeExpr path ->
                     case path of
@@ -409,12 +480,26 @@ goUp =
                 ModuleLocation _ ->
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ModuleDeclLocation mDecl path ->
                     case path of
-                        ModuleDecl left right ->
+                        ModuleDecl moduleName exports imports left right ->
                             let
                                 moduleTerm =
-                                    upList left mDecl right
+                                    { name = moduleName
+                                    , exports = exports
+                                    , imports = imports
+                                    , declarations = upList left mDecl right
+                                    }
                             in
                             ModuleLocation moduleTerm
 
@@ -528,11 +613,25 @@ goDown =
     let
         updateLocation location =
             case location of
-                ModuleLocation [] ->
+                ModuleLocation moduleTerm ->
+                    case moduleTerm.declarations of
+                        [] ->
+                            -- Okay so here we could go down to the module header somehow
+                            location
+
+                        first :: rest ->
+                            ModuleDeclLocation first <|
+                                ModuleDecl moduleTerm.name moduleTerm.exports moduleTerm.imports [] rest
+
+                -- TODO
+                ModuleImportLocation _ _ ->
                     location
 
-                ModuleLocation (first :: rest) ->
-                    ModuleDeclLocation first <| ModuleDecl [] rest
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
 
                 ModuleDeclLocation mDecl up ->
                     case mDecl of
@@ -612,9 +711,19 @@ insertLeft =
                     -- some import statement here.
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ModuleDeclLocation mDecl path ->
                     case path of
-                        ModuleDecl left right ->
+                        ModuleDecl moduleName exports imports left right ->
                             let
                                 declaration =
                                     { pattern = NamePattern "ml"
@@ -625,7 +734,7 @@ insertLeft =
                                     ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation newMDecl <|
-                                ModuleDecl left (mDecl :: right)
+                                ModuleDecl moduleName exports imports left (mDecl :: right)
 
                 TypePatternLocation tPattern path ->
                     location
@@ -696,9 +805,19 @@ insertRight =
                     -- some value declaration to the end of the module file.
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ModuleDeclLocation mDecl path ->
                     case path of
-                        ModuleDecl left right ->
+                        ModuleDecl moduleName exports imports left right ->
                             let
                                 declaration =
                                     { pattern = NamePattern "mr"
@@ -709,7 +828,7 @@ insertRight =
                                     ModuleValueDeclaration declaration
                             in
                             ModuleDeclLocation newMDecl <|
-                                ModuleDecl (mDecl :: left) right
+                                ModuleDecl moduleName exports imports (mDecl :: left) right
 
                 TypePatternLocation tPattern path ->
                     location
@@ -780,6 +899,16 @@ moveLeft =
                 ModuleLocation _ ->
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ExprLocation expr path ->
                     case path of
                         ApplyPath [] _ _ ->
@@ -837,11 +966,12 @@ moveLeft =
 
                 ModuleDeclLocation moduleDecl path ->
                     case path of
-                        ModuleDecl [] _ ->
+                        ModuleDecl _ _ _ [] _ ->
                             location
 
-                        ModuleDecl (l :: left) right ->
-                            ModuleDeclLocation moduleDecl <| ModuleDecl left (l :: right)
+                        ModuleDecl moduleName exports imports (l :: left) right ->
+                            ModuleDeclLocation moduleDecl <|
+                                ModuleDecl moduleName exports imports left (l :: right)
 
         updateState =
             updateStateLocation updateLocation
@@ -859,13 +989,24 @@ moveRight =
                 ModuleLocation _ ->
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ModuleDeclLocation moduleDecl path ->
                     case path of
-                        ModuleDecl _ [] ->
+                        ModuleDecl _ _ _ _ [] ->
                             location
 
-                        ModuleDecl left (r :: right) ->
-                            ModuleDeclLocation moduleDecl <| ModuleDecl (r :: left) right
+                        ModuleDecl moduleName exports imports left (r :: right) ->
+                            ModuleDeclLocation moduleDecl <|
+                                ModuleDecl moduleName exports imports (r :: left) right
 
                 TypeExprLocation typeExpr path ->
                     case path of
@@ -933,6 +1074,16 @@ promoteLet =
                 ModuleLocation _ ->
                     location
 
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 ModuleDeclLocation _ _ ->
                     location
 
@@ -981,25 +1132,33 @@ insertTypeDecl =
     let
         updateLocation location =
             case location of
-                ModuleLocation moduleDecls ->
-                    -- TODO: We would be better to just go down first, and then insert the type declaration,
-                    -- rather than have this kind of duplication of code here.
+                ModuleLocation moduleTerm ->
                     let
                         newTypeDecl =
                             ModuleTypeDeclaration { pattern = NameTypePattern "A", typeExpr = NameType "String" }
                     in
                     ModuleDeclLocation newTypeDecl <|
-                        ModuleDecl [] moduleDecls
+                        ModuleDecl moduleTerm.name moduleTerm.exports moduleTerm.imports [] moduleTerm.declarations
+
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
 
                 ModuleDeclLocation currentDecl path ->
                     case path of
-                        ModuleDecl left right ->
+                        ModuleDecl moduleName exports imports left right ->
                             let
                                 newTypeDecl =
                                     ModuleTypeDeclaration { pattern = NameTypePattern "A", typeExpr = NameType "String" }
                             in
                             ModuleDeclLocation newTypeDecl <|
-                                ModuleDecl left (currentDecl :: right)
+                                ModuleDecl moduleName exports imports left (currentDecl :: right)
 
                 -- All of these remaining ones, could absolutely accept a InsertTypeDecl, you just need to go up
                 -- until you get to the module declarations and *then* insert the new type declaration.
@@ -1135,24 +1294,47 @@ cutAction =
 
                 ModuleDeclLocation moduleDecl path ->
                     case path of
-                        ModuleDecl [] [] ->
+                        ModuleDecl moduleName exports imports [] [] ->
+                            let
+                                -- If you cut the last module declaration in theory we could
+                                -- land on the right most import, and if there are none of them
+                                -- then the right most export, and if none of them then the modulename,
+                                -- basically the same as 'goLeft'. But for now I don't think it's terrible
+                                -- to go up to the module.
+                                moduleTerm =
+                                    { name = moduleName
+                                    , exports = exports
+                                    , imports = imports
+                                    , declarations = []
+                                    }
+                            in
                             { clipBoard = Just editorState.location
-                            , location = ModuleLocation []
+                            , location = ModuleLocation moduleTerm
                             }
 
-                        ModuleDecl (l :: left) right ->
+                        ModuleDecl moduleName exports imports (l :: left) right ->
                             { clipBoard = Just editorState.location
                             , location =
                                 ModuleDeclLocation l <|
-                                    ModuleDecl left right
+                                    ModuleDecl moduleName exports imports left right
                             }
 
-                        ModuleDecl [] (r :: right) ->
+                        ModuleDecl moduleName exports imports [] (r :: right) ->
                             { clipBoard = Just editorState.location
                             , location =
                                 ModuleDeclLocation r <|
-                                    ModuleDecl [] right
+                                    ModuleDecl moduleName exports imports [] right
                             }
+
+                -- TODO
+                ModuleImportLocation _ _ ->
+                    editorState
+
+                ModuleExportLocation _ _ ->
+                    editorState
+
+                ModuleNameLocation _ _ ->
+                    editorState
 
                 ModuleLocation _ ->
                     editorState
@@ -1337,6 +1519,16 @@ update msg model =
                             model
 
                         ModuleDeclLocation _ _ ->
+                            model
+
+                        -- TODO
+                        ModuleImportLocation _ _ ->
+                            model
+
+                        ModuleExportLocation _ _ ->
+                            model
+
+                        ModuleNameLocation _ _ ->
                             model
 
                         ModuleLocation _ ->
@@ -1753,29 +1945,103 @@ viewModuleDeclaration mDecl =
 viewModuleDeclPath : Element msg -> ModuleDeclPath -> Element msg
 viewModuleDeclPath viewed path =
     case path of
-        ModuleDecl left right ->
+        ModuleDecl moduleName exports imports left right ->
             let
                 leftViewed =
                     List.map viewModuleDeclaration left
 
                 rightViewed =
                     List.map viewModuleDeclaration right
+
+                declarations =
+                    upList leftViewed viewed rightViewed
+
+                heading =
+                    viewModuleHeading moduleName exports imports
             in
-            viewModule <| upList leftViewed viewed rightViewed
+            layoutModule heading declarations
 
 
-viewModule : List (Element msg) -> Element msg
-viewModule mDecls =
-    let
-        heading =
+viewExport : Export -> Element msg
+viewExport export =
+    case export.exportConstructors of
+        False ->
+            text export.name
+
+        True ->
             Element.row
                 [ Element.spacing 2 ]
-                [ viewKeyword "module"
-                , text "Main"
-                , viewKeyword "exposing"
+                [ text export.name
                 , viewPunctuation "(..)"
                 ]
-    in
+
+
+layoutExports : List (Element msg) -> Element msg
+layoutExports =
+    Element.column
+        []
+
+
+viewExports : List Export -> Element msg
+viewExports exports =
+    layoutExports <| List.map viewExport exports
+
+
+viewImport : Import -> Element msg
+viewImport imp =
+    Element.row
+        [ Element.spacing 5 ]
+        [ viewKeyword "import"
+        , text imp
+        ]
+
+
+layoutImports : List (Element msg) -> Element msg
+layoutImports =
+    Element.column
+        []
+
+
+viewImports : List Import -> Element msg
+viewImports imports =
+    layoutImports <| List.map viewImport imports
+
+
+layoutModuleHeading : Element msg -> Element msg -> Element msg -> Element msg
+layoutModuleHeading nameRow exports imports =
+    Element.column
+        []
+        [ nameRow
+        , exports
+        , imports
+        ]
+
+
+layoutNameRow : Element msg -> Element msg
+layoutNameRow viewed =
+    Element.row
+        [ Element.spacing 5 ]
+        [ viewKeyword "module"
+        , viewed
+        , viewKeyword "exposing"
+        ]
+
+
+viewNameRow : ModuleName -> Element msg
+viewNameRow moduleName =
+    layoutNameRow <| text moduleName
+
+
+viewModuleHeading : ModuleName -> List Export -> List Import -> Element msg
+viewModuleHeading moduleName exports imports =
+    layoutModuleHeading
+        (viewNameRow moduleName)
+        (viewExports exports)
+        (viewImports imports)
+
+
+layoutModule : Element msg -> List (Element msg) -> Element msg
+layoutModule heading mDecls =
     Element.column
         [ Element.spacing 10 ]
         (heading :: mDecls)
@@ -1809,8 +2075,75 @@ viewFocusedLeaf contents =
 viewLocation : Location -> Element Msg
 viewLocation location =
     case location of
-        ModuleLocation mDecls ->
-            viewHighlighted <| viewModule <| List.map viewModuleDeclaration mDecls
+        ModuleLocation moduleTerm ->
+            let
+                declarations =
+                    List.map viewModuleDeclaration moduleTerm.declarations
+
+                heading =
+                    viewModuleHeading moduleTerm.name moduleTerm.exports moduleTerm.imports
+            in
+            viewHighlighted <| layoutModule heading declarations
+
+        ModuleImportLocation importTerm path ->
+            let
+                viewed =
+                    viewFocusedLeaf importTerm
+            in
+            case path of
+                ModuleImportPath moduleName exports left right declarations ->
+                    let
+                        viewedLeft =
+                            List.map viewImport left
+
+                        viewedRight =
+                            List.map viewImport right
+
+                        heading =
+                            layoutModuleHeading
+                                (viewNameRow moduleName)
+                                (viewExports exports)
+                                (layoutImports <| upList viewedLeft viewed viewedRight)
+                    in
+                    layoutModule heading <| List.map viewModuleDeclaration declarations
+
+        ModuleExportLocation exportTerm path ->
+            let
+                -- TODO: we must be able to export the constructors or not
+                viewed =
+                    viewFocusedLeaf exportTerm.name
+            in
+            case path of
+                ModuleExportPath moduleName left right imports declarations ->
+                    let
+                        viewedLeft =
+                            List.map viewExport left
+
+                        viewedRight =
+                            List.map viewExport right
+
+                        heading =
+                            layoutModuleHeading
+                                (viewNameRow moduleName)
+                                (layoutExports <| upList viewedLeft viewed viewedRight)
+                                (viewImports imports)
+                    in
+                    layoutModule heading <| List.map viewModuleDeclaration declarations
+
+        ModuleNameLocation moduleName path ->
+            case path of
+                ModuleNamePath exports imports declarations ->
+                    let
+                        viewed =
+                            viewFocusedLeaf moduleName
+
+                        heading =
+                            layoutModuleHeading
+                                (layoutNameRow viewed)
+                                (viewExports exports)
+                                (viewImports imports)
+                    in
+                    layoutModule heading <| List.map viewModuleDeclaration declarations
 
         ModuleDeclLocation mDecl path ->
             let
