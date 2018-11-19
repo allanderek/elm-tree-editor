@@ -2177,7 +2177,9 @@ layoutTypeDeclaration viewedTypePattern viewedTypeExpr =
             , viewedTypePattern
             , viewPunctuation "="
             ]
-        , viewedTypeExpr
+        , Element.el
+            [ indentElement ]
+            viewedTypeExpr
         ]
 
 
