@@ -2276,10 +2276,10 @@ layoutExports exports =
                         [ Element.spacing 5 ]
                         [ viewPunctuation "(", first ]
 
-                viewOther o =
+                viewOther other =
                     Element.row
                         [ Element.spacing 5 ]
-                        [ viewPunctuation ",", first ]
+                        [ viewPunctuation ",", other ]
 
                 viewedOthers =
                     List.map viewOther others
