@@ -1705,19 +1705,51 @@ update msg model =
 
                 command =
                     case newModel.editorState.location of
-                        ExprLocation (Leaf _) _ ->
+                        ExprLocation expr _ ->
+                            case expr of
+                                Leaf _ ->
+                                    focusLeafBox
+
+                                Apply _ ->
+                                    Cmd.none
+
+                                Let _ _ ->
+                                    Cmd.none
+
+                        PatternLocation pattern _ ->
+                            case pattern of
+                                NamePattern _ ->
+                                    focusLeafBox
+
+                                ApplyPattern _ ->
+                                    Cmd.none
+
+                        TypePatternLocation typePattern _ ->
+                            case typePattern of
+                                NameTypePattern _ ->
+                                    focusLeafBox
+
+                        TypeExprLocation typeExpr _ ->
+                            case typeExpr of
+                                NameType _ ->
+                                    focusLeafBox
+
+                        ModuleImportLocation _ _ ->
                             focusLeafBox
 
-                        PatternLocation (NamePattern _) _ ->
+                        ModuleExportLocation _ _ ->
                             focusLeafBox
 
-                        TypePatternLocation (NameTypePattern _) _ ->
+                        ModuleNameLocation _ _ ->
                             focusLeafBox
 
-                        TypeExprLocation (NameType _) _ ->
-                            focusLeafBox
+                        ModuleDeclLocation _ _ ->
+                            Cmd.none
 
-                        _ ->
+                        ModuleLocation _ ->
+                            Cmd.none
+
+                        DeclLocation _ _ ->
                             Cmd.none
             in
             ( newModel, command )
@@ -1752,6 +1784,18 @@ update msg model =
                             updateLocation <|
                                 TypePatternLocation (NameTypePattern content) path
 
+                        ModuleNameLocation _ path ->
+                            updateLocation <|
+                                ModuleNameLocation content path
+
+                        ModuleImportLocation _ path ->
+                            updateLocation <|
+                                ModuleImportLocation content path
+
+                        ModuleExportLocation export path ->
+                            updateLocation <|
+                                ModuleExportLocation { export | name = content } path
+
                         ExprLocation _ _ ->
                             model
 
@@ -1762,16 +1806,6 @@ update msg model =
                             model
 
                         ModuleDeclLocation _ _ ->
-                            model
-
-                        -- TODO
-                        ModuleImportLocation _ _ ->
-                            model
-
-                        ModuleExportLocation _ _ ->
-                            model
-
-                        ModuleNameLocation _ _ ->
                             model
 
                         ModuleLocation _ ->
