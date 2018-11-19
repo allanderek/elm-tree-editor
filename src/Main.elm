@@ -1944,7 +1944,7 @@ header editorState =
 
 indentElement : Element.Attr decorative msg
 indentElement =
-    Element.moveRight 10
+    Element.moveRight 20
 
 
 viewKeyword : String -> Element msg
@@ -1998,7 +1998,7 @@ viewLet declarations expr =
 viewDeclaration : Element msg -> Element msg -> Element msg
 viewDeclaration declPattern declExpr =
     Element.column
-        [ Element.padding 10 ]
+        [ indentElement ]
         [ Element.row
             [ Element.spacing 8 ]
             [ el
@@ -2254,9 +2254,42 @@ viewExport export =
 
 
 layoutExports : List (Element msg) -> Element msg
-layoutExports =
-    Element.column
-        []
+layoutExports exports =
+    case exports of
+        [] ->
+            Element.el
+                [ Font.light ]
+                (text "No exports")
+
+        [ only ] ->
+            Element.row
+                [ indentElement ]
+                [ viewPunctuation "("
+                , only
+                , viewPunctuation ")"
+                ]
+
+        first :: others ->
+            let
+                viewedFirst =
+                    Element.row
+                        [ Element.spacing 5 ]
+                        [ viewPunctuation "(", first ]
+
+                viewOther o =
+                    Element.row
+                        [ Element.spacing 5 ]
+                        [ viewPunctuation ",", first ]
+
+                viewedOthers =
+                    List.map viewOther others
+
+                closing =
+                    viewPunctuation ")"
+            in
+            Element.column
+                [ indentElement ]
+                (viewedFirst :: viewedOthers ++ [ closing ])
 
 
 viewExports : List Export -> Element msg
