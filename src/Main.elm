@@ -237,7 +237,8 @@ initialLocation =
 
         moduleTerm =
             { name = "Main"
-            , exports = [ { name = "main", exportConstructors = False } ]
+            , exports =
+                List.map (\n -> { name = n, exportConstructors = False }) [ "main", "init", "update" ]
             , imports = [ "Html", "Html.Attributes", "Html.Events" ]
             , declarations = [ typeDecl, moduleDecl ]
             }
@@ -304,19 +305,10 @@ goLeft =
                 ModuleLocation _ ->
                     location
 
-                ModuleImportLocation importTerm path ->
+                ModuleNameLocation _ path ->
                     case path of
-                        ModuleImportPath moduleName [] [] right declarations ->
-                            ModuleNameLocation moduleName <|
-                                ModuleNamePath [] (importTerm :: right) declarations
-
-                        ModuleImportPath moduleName (e :: exports) [] right declarations ->
-                            ModuleExportLocation e <|
-                                ModuleExportPath moduleName exports [] (importTerm :: right) declarations
-
-                        ModuleImportPath moduleName exports (l :: left) right declarations ->
-                            ModuleImportLocation l <|
-                                ModuleImportPath moduleName exports left (importTerm :: right) declarations
+                        ModuleNamePath _ _ _ ->
+                            location
 
                 ModuleExportLocation export path ->
                     case path of
@@ -328,10 +320,41 @@ goLeft =
                             ModuleExportLocation l <|
                                 ModuleExportPath moduleName left (export :: right) imports declarations
 
-                ModuleNameLocation _ path ->
+                ModuleImportLocation importTerm path ->
                     case path of
-                        ModuleNamePath _ _ _ ->
-                            location
+                        ModuleImportPath moduleName exports (l :: left) right declarations ->
+                            ModuleImportLocation l <|
+                                ModuleImportPath moduleName exports left (importTerm :: right) declarations
+
+                        ModuleImportPath moduleName exports [] right declarations ->
+                            case List.reverse exports of
+                                [] ->
+                                    ModuleNameLocation moduleName <|
+                                        ModuleNamePath [] (importTerm :: right) declarations
+
+                                export :: leftExports ->
+                                    ModuleExportLocation export <|
+                                        ModuleExportPath moduleName leftExports [] (importTerm :: right) declarations
+
+                ModuleDeclLocation mDecl path ->
+                    case path of
+                        ModuleDecl moduleName exports imports (l :: left) right ->
+                            ModuleDeclLocation l <| ModuleDecl moduleName exports imports left (mDecl :: right)
+
+                        ModuleDecl moduleName exports imports [] right ->
+                            case List.reverse imports of
+                                importTerm :: leftImports ->
+                                    ModuleImportLocation importTerm <|
+                                        ModuleImportPath moduleName exports leftImports [] (mDecl :: right)
+
+                                [] ->
+                                    case List.reverse exports of
+                                        export :: leftExports ->
+                                            ModuleExportLocation export <|
+                                                ModuleExportPath moduleName leftExports [] imports (mDecl :: right)
+
+                                        [] ->
+                                            ModuleNameLocation moduleName <| ModuleNamePath [] [] (mDecl :: right)
 
                 ExprLocation expr path ->
                     case path of
@@ -386,20 +409,6 @@ goLeft =
                         ModuleDeclTypePattern _ _ ->
                             location
 
-                ModuleDeclLocation mDecl path ->
-                    case path of
-                        ModuleDecl moduleName [] [] [] right ->
-                            ModuleNameLocation moduleName <| ModuleNamePath [] [] (mDecl :: right)
-
-                        ModuleDecl moduleName (e :: exports) [] [] right ->
-                            ModuleExportLocation e <| ModuleExportPath moduleName exports [] [] (mDecl :: right)
-
-                        ModuleDecl moduleName exports (i :: imports) [] right ->
-                            ModuleImportLocation i <| ModuleImportPath moduleName exports imports [] (mDecl :: right)
-
-                        ModuleDecl moduleName exports imports (l :: left) right ->
-                            ModuleDeclLocation l <| ModuleDecl moduleName exports imports left (mDecl :: right)
-
         updateState =
             updateStateLocation updateLocation
     in
@@ -415,36 +424,6 @@ goRight =
             case location of
                 ModuleLocation _ ->
                     location
-
-                ModuleImportLocation importTerm path ->
-                    case path of
-                        ModuleImportPath moduleName exports left [] [] ->
-                            location
-
-                        ModuleImportPath moduleName exports left [] (decl :: declarations) ->
-                            ModuleDeclLocation decl <|
-                                ModuleDecl moduleName exports (importTerm :: left) [] declarations
-
-                        ModuleImportPath moduleName exports left (r :: right) declarations ->
-                            ModuleImportLocation r <|
-                                ModuleImportPath moduleName exports (importTerm :: left) right declarations
-
-                ModuleExportLocation export path ->
-                    case path of
-                        ModuleExportPath moduleName left [] [] [] ->
-                            location
-
-                        ModuleExportPath moduleName left [] [] (decl :: declarations) ->
-                            ModuleDeclLocation decl <|
-                                ModuleDecl moduleName (export :: left) [] [] declarations
-
-                        ModuleExportPath moduleName left [] (imp :: imports) declarations ->
-                            ModuleImportLocation imp <|
-                                ModuleImportPath moduleName (export :: left) [] imports declarations
-
-                        ModuleExportPath moduleName left (r :: right) imports declarations ->
-                            ModuleExportLocation r <|
-                                ModuleExportPath moduleName (export :: left) right imports declarations
 
                 ModuleNameLocation moduleName path ->
                     case path of
@@ -462,6 +441,48 @@ goRight =
                         ModuleNamePath (export :: exports) imports declarations ->
                             ModuleExportLocation export <|
                                 ModuleExportPath moduleName [] exports imports declarations
+
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName left [] [] [] ->
+                            location
+
+                        ModuleExportPath moduleName left [] [] (decl :: declarations) ->
+                            let
+                                exports =
+                                    List.reverse (export :: left)
+                            in
+                            ModuleDeclLocation decl <|
+                                ModuleDecl moduleName exports [] [] declarations
+
+                        ModuleExportPath moduleName left [] (imp :: imports) declarations ->
+                            let
+                                exports =
+                                    List.reverse (export :: left)
+                            in
+                            ModuleImportLocation imp <|
+                                ModuleImportPath moduleName exports [] imports declarations
+
+                        ModuleExportPath moduleName left (r :: right) imports declarations ->
+                            ModuleExportLocation r <|
+                                ModuleExportPath moduleName (export :: left) right imports declarations
+
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports left [] [] ->
+                            location
+
+                        ModuleImportPath moduleName exports left (r :: right) declarations ->
+                            ModuleImportLocation r <|
+                                ModuleImportPath moduleName exports (importTerm :: left) right declarations
+
+                        ModuleImportPath moduleName exports left [] (decl :: declarations) ->
+                            let
+                                imports =
+                                    List.reverse (importTerm :: left)
+                            in
+                            ModuleDeclLocation decl <|
+                                ModuleDecl moduleName exports imports [] declarations
 
                 ModuleDeclLocation mDecl path ->
                     case path of
