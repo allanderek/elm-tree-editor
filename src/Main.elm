@@ -1995,10 +1995,10 @@ viewLet declarations expr =
         ]
 
 
-viewDeclaration : Element msg -> Element msg -> Element msg
-viewDeclaration declPattern declExpr =
+layoutDeclaration : Element msg -> Element msg -> Element msg
+layoutDeclaration declPattern declExpr =
     Element.column
-        [ indentElement ]
+        []
         [ Element.row
             [ Element.spacing 8 ]
             [ el
@@ -2016,7 +2016,7 @@ viewDeclaration declPattern declExpr =
 
 viewDeclarationList : List ValueDeclaration -> List (Element msg)
 viewDeclarationList declarations =
-    List.map viewDecl declarations
+    List.map viewDeclaration declarations
 
 
 
@@ -2027,9 +2027,9 @@ viewDeclarationList declarations =
 -- layoutDeclaration : Element msg -> Element msg -> Element msg
 
 
-viewDecl : ValueDeclaration -> Element msg
-viewDecl decl =
-    viewDeclaration
+viewDeclaration : ValueDeclaration -> Element msg
+viewDeclaration decl =
+    layoutDeclaration
         (viewPattern decl.pattern)
         (viewExpr decl.expr)
 
@@ -2087,14 +2087,14 @@ viewExprPath viewed path =
         DeclExpr pattern up ->
             let
                 child =
-                    viewDeclaration (viewPattern pattern) viewed
+                    layoutDeclaration (viewPattern pattern) viewed
             in
             viewDeclPath child up
 
         ModuleDeclExpr pattern up ->
             let
                 child =
-                    viewDeclaration (viewPattern pattern) viewed
+                    layoutDeclaration (viewPattern pattern) viewed
             in
             viewModuleDeclPath child up
 
@@ -2141,14 +2141,14 @@ viewPatternPath viewed path =
         DeclPattern up expr ->
             let
                 child =
-                    viewDeclaration viewed <| viewExpr expr
+                    layoutDeclaration viewed <| viewExpr expr
             in
             viewDeclPath child up
 
         ModuleDeclPattern up expr ->
             let
                 child =
-                    viewDeclaration viewed <| viewExpr expr
+                    layoutDeclaration viewed <| viewExpr expr
             in
             viewModuleDeclPath child up
 
@@ -2211,7 +2211,7 @@ viewModuleDeclaration : ModuleDeclaration -> Element msg
 viewModuleDeclaration mDecl =
     case mDecl of
         ModuleValueDeclaration declaration ->
-            viewDecl declaration
+            viewDeclaration declaration
 
         ModuleTypeDeclaration declaration ->
             layoutTypeDeclaration
@@ -2496,9 +2496,7 @@ viewLocation location =
             let
                 viewed =
                     viewHighlighted <|
-                        viewDeclaration
-                            (viewPattern declaration.pattern)
-                            (viewExpr declaration.expr)
+                        viewDeclaration declaration
             in
             viewDeclPath viewed path
 
