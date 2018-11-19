@@ -2299,13 +2299,18 @@ viewExports exports =
     layoutExports <| List.map viewExport exports
 
 
-viewImport : Import -> Element msg
-viewImport imp =
+layoutImport : Element msg -> Element msg
+layoutImport importTerm =
     Element.row
         [ Element.spacing 5 ]
         [ viewKeyword "import"
-        , text imp
+        , importTerm
         ]
+
+
+viewImport : Import -> Element msg
+viewImport importTerm =
+    layoutImport <| text importTerm
 
 
 layoutImports : List (Element msg) -> Element msg
@@ -2400,7 +2405,7 @@ viewLocation location =
         ModuleImportLocation importTerm path ->
             let
                 viewed =
-                    viewFocusedLeaf importTerm
+                    layoutImport <| viewFocusedLeaf importTerm
             in
             case path of
                 ModuleImportPath moduleName exports left right declarations ->
