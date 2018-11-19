@@ -304,15 +304,34 @@ goLeft =
                 ModuleLocation _ ->
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName [] [] right declarations ->
+                            ModuleNameLocation moduleName <|
+                                ModuleNamePath [] (importTerm :: right) declarations
 
-                ModuleExportLocation _ _ ->
-                    location
+                        ModuleImportPath moduleName (e :: exports) [] right declarations ->
+                            ModuleExportLocation e <|
+                                ModuleExportPath moduleName exports [] (importTerm :: right) declarations
 
-                ModuleNameLocation _ _ ->
-                    location
+                        ModuleImportPath moduleName exports (l :: left) right declarations ->
+                            ModuleImportLocation l <|
+                                ModuleImportPath moduleName exports left (importTerm :: right) declarations
+
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName [] right imports declarations ->
+                            ModuleNameLocation moduleName <|
+                                ModuleNamePath (export :: right) imports declarations
+
+                        ModuleExportPath moduleName (l :: left) right imports declarations ->
+                            ModuleExportLocation l <|
+                                ModuleExportPath moduleName left (export :: right) imports declarations
+
+                ModuleNameLocation _ path ->
+                    case path of
+                        ModuleNamePath _ _ _ ->
+                            location
 
                 ExprLocation expr path ->
                     case path of
@@ -397,15 +416,52 @@ goRight =
                 ModuleLocation _ ->
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports left [] [] ->
+                            location
 
-                ModuleExportLocation _ _ ->
-                    location
+                        ModuleImportPath moduleName exports left [] (decl :: declarations) ->
+                            ModuleDeclLocation decl <|
+                                ModuleDecl moduleName exports (importTerm :: left) [] declarations
 
-                ModuleNameLocation _ _ ->
-                    location
+                        ModuleImportPath moduleName exports left (r :: right) declarations ->
+                            ModuleImportLocation r <|
+                                ModuleImportPath moduleName exports (importTerm :: left) right declarations
+
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName left [] [] [] ->
+                            location
+
+                        ModuleExportPath moduleName left [] [] (decl :: declarations) ->
+                            ModuleDeclLocation decl <|
+                                ModuleDecl moduleName (export :: left) [] [] declarations
+
+                        ModuleExportPath moduleName left [] (imp :: imports) declarations ->
+                            ModuleImportLocation imp <|
+                                ModuleImportPath moduleName (export :: left) [] imports declarations
+
+                        ModuleExportPath moduleName left (r :: right) imports declarations ->
+                            ModuleExportLocation r <|
+                                ModuleExportPath moduleName (export :: left) right imports declarations
+
+                ModuleNameLocation moduleName path ->
+                    case path of
+                        ModuleNamePath [] [] [] ->
+                            location
+
+                        ModuleNamePath [] [] (decl :: declarations) ->
+                            ModuleDeclLocation decl <|
+                                ModuleDecl moduleName [] [] [] declarations
+
+                        ModuleNamePath [] (imp :: imports) declarations ->
+                            ModuleImportLocation imp <|
+                                ModuleImportPath moduleName [] [] imports declarations
+
+                        ModuleNamePath (export :: exports) imports declarations ->
+                            ModuleExportLocation export <|
+                                ModuleExportPath moduleName [] exports imports declarations
 
                 ModuleDeclLocation mDecl path ->
                     case path of
@@ -480,15 +536,44 @@ goUp =
                 ModuleLocation _ ->
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports left right declarations ->
+                            let
+                                moduleTerm =
+                                    { name = moduleName
+                                    , exports = exports
+                                    , imports = upList left importTerm right
+                                    , declarations = declarations
+                                    }
+                            in
+                            ModuleLocation moduleTerm
 
-                ModuleExportLocation _ _ ->
-                    location
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName left right imports declarations ->
+                            let
+                                moduleTerm =
+                                    { name = moduleName
+                                    , exports = upList left export right
+                                    , imports = imports
+                                    , declarations = declarations
+                                    }
+                            in
+                            ModuleLocation moduleTerm
 
-                ModuleNameLocation _ _ ->
-                    location
+                ModuleNameLocation moduleName path ->
+                    case path of
+                        ModuleNamePath exports imports declarations ->
+                            let
+                                moduleTerm =
+                                    { name = moduleName
+                                    , exports = exports
+                                    , imports = imports
+                                    , declarations = declarations
+                                    }
+                            in
+                            ModuleLocation moduleTerm
 
                 ModuleDeclLocation mDecl path ->
                     case path of
@@ -615,15 +700,26 @@ goDown =
             case location of
                 ModuleLocation moduleTerm ->
                     case moduleTerm.declarations of
-                        [] ->
-                            -- Okay so here we could go down to the module header somehow
-                            location
-
                         first :: rest ->
                             ModuleDeclLocation first <|
                                 ModuleDecl moduleTerm.name moduleTerm.exports moduleTerm.imports [] rest
 
-                -- TODO
+                        [] ->
+                            case moduleTerm.imports of
+                                importTerm :: imports ->
+                                    ModuleImportLocation importTerm <|
+                                        ModuleImportPath moduleTerm.name moduleTerm.exports [] imports moduleTerm.declarations
+
+                                [] ->
+                                    case moduleTerm.exports of
+                                        export :: exports ->
+                                            ModuleExportLocation export <|
+                                                ModuleExportPath moduleTerm.name [] exports moduleTerm.imports moduleTerm.declarations
+
+                                        [] ->
+                                            ModuleNameLocation moduleTerm.name <|
+                                                ModuleNamePath moduleTerm.exports moduleTerm.imports moduleTerm.declarations
+
                 ModuleImportLocation _ _ ->
                     location
 
@@ -711,12 +807,27 @@ insertLeft =
                     -- some import statement here.
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports left right declarations ->
+                            let
+                                newImport =
+                                    "Left"
+                            in
+                            ModuleImportLocation newImport <|
+                                ModuleImportPath moduleName exports left (importTerm :: right) declarations
 
-                ModuleExportLocation _ _ ->
-                    location
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName left right imports declarations ->
+                            let
+                                newExport =
+                                    { name = "left"
+                                    , exportConstructors = False
+                                    }
+                            in
+                            ModuleExportLocation newExport <|
+                                ModuleExportPath moduleName left (export :: right) imports declarations
 
                 ModuleNameLocation _ _ ->
                     location
@@ -805,12 +916,27 @@ insertRight =
                     -- some value declaration to the end of the module file.
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports left right declarations ->
+                            let
+                                newImport =
+                                    "Right"
+                            in
+                            ModuleImportLocation newImport <|
+                                ModuleImportPath moduleName exports (importTerm :: left) right declarations
 
-                ModuleExportLocation _ _ ->
-                    location
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName left right imports declarations ->
+                            let
+                                newExport =
+                                    { name = "right"
+                                    , exportConstructors = False
+                                    }
+                            in
+                            ModuleExportLocation newExport <|
+                                ModuleExportPath moduleName (export :: left) right imports declarations
 
                 ModuleNameLocation _ _ ->
                     location
@@ -899,12 +1025,23 @@ moveLeft =
                 ModuleLocation _ ->
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports (l :: left) right declarations ->
+                            ModuleImportLocation importTerm <|
+                                ModuleImportPath moduleName exports left (l :: right) declarations
 
-                ModuleExportLocation _ _ ->
-                    location
+                        ModuleImportPath moduleName exports [] right declarations ->
+                            location
+
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName (l :: left) right imports declarations ->
+                            ModuleExportLocation export <|
+                                ModuleExportPath moduleName left (l :: right) imports declarations
+
+                        ModuleExportPath moduleName [] right imports declarations ->
+                            location
 
                 ModuleNameLocation _ _ ->
                     location
@@ -989,12 +1126,23 @@ moveRight =
                 ModuleLocation _ ->
                     location
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    case path of
+                        ModuleImportPath moduleName exports left (r :: right) declarations ->
+                            ModuleImportLocation importTerm <|
+                                ModuleImportPath moduleName exports (r :: left) right declarations
 
-                ModuleExportLocation _ _ ->
-                    location
+                        ModuleImportPath moduleName exports left [] declarations ->
+                            location
+
+                ModuleExportLocation export path ->
+                    case path of
+                        ModuleExportPath moduleName left (r :: right) imports declarations ->
+                            ModuleExportLocation export <|
+                                ModuleExportPath moduleName (r :: left) right imports declarations
+
+                        ModuleExportPath moduleName left [] imports declarations ->
+                            location
 
                 ModuleNameLocation _ _ ->
                     location
@@ -1074,7 +1222,6 @@ promoteLet =
                 ModuleLocation _ ->
                     location
 
-                -- TODO
                 ModuleImportLocation _ _ ->
                     location
 
@@ -1140,16 +1287,6 @@ insertTypeDecl =
                     ModuleDeclLocation newTypeDecl <|
                         ModuleDecl moduleTerm.name moduleTerm.exports moduleTerm.imports [] moduleTerm.declarations
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    location
-
-                ModuleExportLocation _ _ ->
-                    location
-
-                ModuleNameLocation _ _ ->
-                    location
-
                 ModuleDeclLocation currentDecl path ->
                     case path of
                         ModuleDecl moduleName exports imports left right ->
@@ -1162,6 +1299,19 @@ insertTypeDecl =
 
                 -- All of these remaining ones, could absolutely accept a InsertTypeDecl, you just need to go up
                 -- until you get to the module declarations and *then* insert the new type declaration.
+                -- In theory a lot of the module header stuff could be done at any location and perhaps with a
+                -- dialog. For example, I really think we should have 'add import' and particularly when on a module declaration
+                -- we should have either "add to export list", or "remove from export list", though not quite sure what to do about
+                -- constructors in that scenario?
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleExportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
                 TypePatternLocation tPattern path ->
                     location
 
@@ -1326,12 +1476,61 @@ cutAction =
                                     ModuleDecl moduleName exports imports [] right
                             }
 
-                -- TODO
-                ModuleImportLocation _ _ ->
-                    editorState
+                ModuleImportLocation importTerm path ->
+                    let
+                        newLocation =
+                            case path of
+                                ModuleImportPath moduleName exports (l :: left) right declarations ->
+                                    ModuleImportLocation l <|
+                                        ModuleImportPath moduleName exports left right declarations
 
-                ModuleExportLocation _ _ ->
-                    editorState
+                                ModuleImportPath moduleName exports [] (r :: right) declarations ->
+                                    ModuleImportLocation r <|
+                                        ModuleImportPath moduleName exports [] right declarations
+
+                                ModuleImportPath moduleName exports [] [] (decl :: declarations) ->
+                                    ModuleDeclLocation decl <|
+                                        ModuleDecl moduleName exports [] [] declarations
+
+                                -- So note, we do not ever go on to the export list, this seems an unlikely natural
+                                -- thing to do if you're deleting the last import and there are no declarations.
+                                -- It may be that actually people do wish to do that, because we're the bascially doing
+                                -- is deleting everything, if that is the case obviously we could add it here.
+                                ModuleImportPath moduleName exports [] [] [] ->
+                                    ModuleNameLocation moduleName <|
+                                        ModuleNamePath exports [] []
+                    in
+                    { clipBoard = Just editorState.location
+                    , location = newLocation
+                    }
+
+                ModuleExportLocation export path ->
+                    let
+                        newLocation =
+                            case path of
+                                ModuleExportPath moduleName left (r :: right) imports declarations ->
+                                    ModuleExportLocation r <|
+                                        ModuleExportPath moduleName left right imports declarations
+
+                                ModuleExportPath moduleName (l :: left) [] imports declarations ->
+                                    ModuleExportLocation l <|
+                                        ModuleExportPath moduleName left [] imports declarations
+
+                                ModuleExportPath moduleName [] [] imports (decl :: declarations) ->
+                                    ModuleDeclLocation decl <|
+                                        ModuleDecl moduleName [] imports [] declarations
+
+                                ModuleExportPath moduleName [] [] (imp :: imports) [] ->
+                                    ModuleImportLocation imp <|
+                                        ModuleImportPath moduleName [] [] imports []
+
+                                ModuleExportPath moduleName [] [] [] [] ->
+                                    ModuleNameLocation moduleName <|
+                                        ModuleNamePath [] [] []
+                    in
+                    { clipBoard = Just editorState.location
+                    , location = newLocation
+                    }
 
                 ModuleNameLocation _ _ ->
                     editorState
@@ -1408,7 +1607,51 @@ pasteAction =
                                 | location = ModuleLocation moduleExpr
                             }
 
-                        _ ->
+                        ( ModuleImportLocation _ path, ModuleImportLocation importTerm _ ) ->
+                            { editorState
+                                | location = ModuleImportLocation importTerm path
+                            }
+
+                        ( ModuleExportLocation _ path, ModuleExportLocation export _ ) ->
+                            { editorState
+                                | location = ModuleExportLocation export path
+                            }
+
+                        ( ModuleNameLocation _ path, ModuleNameLocation name _ ) ->
+                            { editorState
+                                | location = ModuleNameLocation name path
+                            }
+
+                        -- I'm just spelling all of these out so that I get a compiler warning to update the above
+                        -- (and below) whenever we add a location kind.
+                        ( ExprLocation _ _, _ ) ->
+                            editorState
+
+                        ( DeclLocation _ _, _ ) ->
+                            editorState
+
+                        ( PatternLocation _ _, _ ) ->
+                            editorState
+
+                        ( TypeExprLocation _ _, _ ) ->
+                            editorState
+
+                        ( TypePatternLocation _ _, _ ) ->
+                            editorState
+
+                        ( ModuleImportLocation _ _, _ ) ->
+                            editorState
+
+                        ( ModuleExportLocation _ _, _ ) ->
+                            editorState
+
+                        ( ModuleNameLocation _ _, _ ) ->
+                            editorState
+
+                        ( ModuleDeclLocation _ _, _ ) ->
+                            editorState
+
+                        ( ModuleLocation _, _ ) ->
                             editorState
     in
     { updateState = updateState
