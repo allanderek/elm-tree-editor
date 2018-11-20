@@ -1973,6 +1973,7 @@ viewKeyword word =
     el
         [ Font.color themeColor1
         , Font.bold
+        , Element.padding 3
         ]
         (text word)
 
@@ -2281,7 +2282,9 @@ layoutExports exports =
     case exports of
         [] ->
             Element.el
-                [ Font.light ]
+                [ indentElement
+                , Font.light
+                ]
                 (text "No exports")
 
         [ only ] ->
@@ -2391,7 +2394,7 @@ viewHighlighted viewed =
         [ Border.width 2
         , Border.rounded 5
         , Border.color themeColor5
-        , Element.padding 10
+        , Element.paddingEach { right = 10, top = 0, bottom = 0, left = 0 }
         ]
         viewed
 
@@ -2401,6 +2404,9 @@ viewFocusedLeaf contents =
     Input.text
         [ classAttribute "leaf-input"
         , idAttribute leafBoxId
+        , Element.width Element.shrink
+        , Background.color themeColor2
+        , Element.paddingXY 1 1
         , Element.width Element.shrink
         ]
         { onChange = LeafInput
