@@ -104,6 +104,18 @@ type Expr
     = Leaf String
     | Apply (List Expr)
     | Let (List ValueDeclaration) Expr
+    | Case (List CaseBranch)
+
+
+
+-- It may seem that ValueDeclaration and CaseBranch could be one and the same
+-- however ultimately ValueDeclaration will have a type associated with it.
+
+
+type alias CaseBranch =
+    { pattern : Pattern
+    , expr : Expr
+    }
 
 
 type alias ValueDeclaration =
@@ -120,12 +132,17 @@ type Pattern
 type ExprPath
     = ApplyPath (List Expr) ExprPath (List Expr)
     | LetExpr (List ValueDeclaration) ExprPath
+    | CaseExprPath Pattern CaseBranchPath
     | DeclExpr Pattern DeclPath
     | ModuleDeclExpr Pattern ModuleDeclPath
 
 
 type DeclPath
     = LetDecl (List ValueDeclaration) ExprPath (List ValueDeclaration) Expr
+
+
+type CaseBranchPath
+    = CaseBranchPath (List CaseBranch) ExprPath (List CaseBranch)
 
 
 type ModuleDeclPath
@@ -146,6 +163,7 @@ type ModuleNamePath
 
 type PatternPath
     = ApplyPatternPath (List Pattern) PatternPath (List Pattern)
+    | CasePattern CaseBranchPath Expr
     | DeclPattern DeclPath Expr
     | ModuleDeclPattern ModuleDeclPath Expr
 
@@ -206,6 +224,7 @@ type alias Module =
 
 type Location
     = ExprLocation Expr ExprPath
+    | CaseLocation CaseBranch CaseBranchPath
     | DeclLocation ValueDeclaration DeclPath
     | PatternLocation Pattern PatternPath
     | TypeExprLocation TypeExpr TypeExprPath
@@ -227,7 +246,11 @@ initialLocation =
                 , { pattern = NamePattern "c", expr = Leaf "3" }
                 , { pattern = NamePattern "d", expr = Leaf "4" }
                 ]
-                (Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ])
+                (Case
+                    [ { pattern = NamePattern "Just a", expr = Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ] }
+                    , { pattern = NamePattern "Nothing", expr = Leaf "[]" }
+                    ]
+                )
 
         moduleDecl =
             ModuleValueDeclaration { pattern = NamePattern "main", expr = expr }
@@ -370,11 +393,22 @@ goLeft =
                         LetExpr (l :: left) up ->
                             DeclLocation l <| LetDecl left up [] expr
 
+                        CaseExprPath pattern up ->
+                            PatternLocation pattern <| CasePattern up expr
+
                         DeclExpr pattern up ->
                             PatternLocation pattern <| DeclPattern up expr
 
                         ModuleDeclExpr pattern up ->
                             PatternLocation pattern <| ModuleDeclPattern up expr
+
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath [] _ _ ->
+                            location
+
+                        CaseBranchPath (l :: left) up right ->
+                            CaseLocation l <| CaseBranchPath left up (branch :: right)
 
                 DeclLocation declaration path ->
                     case path of
@@ -391,6 +425,10 @@ goLeft =
 
                         ApplyPatternPath (l :: left) up right ->
                             PatternLocation l <| ApplyPatternPath left up (pattern :: right)
+
+                        -- In theory we could go left onto the previous case/declaration for these two.
+                        CasePattern _ _ ->
+                            location
 
                         DeclPattern _ _ ->
                             location
@@ -510,6 +548,9 @@ goRight =
                         ApplyPatternPath left up (r :: right) ->
                             PatternLocation r <| ApplyPatternPath (pattern :: left) up right
 
+                        CasePattern up expr ->
+                            ExprLocation expr <| CaseExprPath pattern up
+
                         DeclPattern up expr ->
                             ExprLocation expr <| DeclExpr pattern up
 
@@ -524,6 +565,14 @@ goRight =
                         LetDecl left up (r :: right) expr ->
                             DeclLocation r <| LetDecl (declaration :: left) up right expr
 
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath left up [] ->
+                            location
+
+                        CaseBranchPath left up (r :: right) ->
+                            CaseLocation r <| CaseBranchPath (branch :: left) up right
+
                 ExprLocation expr path ->
                     case path of
                         ApplyPath _ _ [] ->
@@ -533,6 +582,11 @@ goRight =
                             ExprLocation r <| ApplyPath (expr :: left) up right
 
                         LetExpr _ _ ->
+                            location
+
+                        -- Both of these could in theory go right on to the next
+                        -- case/declaration.
+                        CaseExprPath _ _ ->
                             location
 
                         DeclExpr _ _ ->
@@ -636,6 +690,15 @@ goUp =
                             in
                             PatternLocation newPattern up
 
+                        CasePattern up expr ->
+                            let
+                                caseBranch =
+                                    { pattern = pattern
+                                    , expr = expr
+                                    }
+                            in
+                            CaseLocation caseBranch up
+
                         DeclPattern up expr ->
                             let
                                 declaration =
@@ -669,6 +732,18 @@ goUp =
                             in
                             ExprLocation expr up
 
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath left up right ->
+                            let
+                                branches =
+                                    upList left branch right
+
+                                expr =
+                                    Case branches
+                            in
+                            ExprLocation expr up
+
                 ExprLocation expr path ->
                     case path of
                         ApplyPath left up right ->
@@ -684,6 +759,15 @@ goUp =
                                     Let (List.reverse declarations) expr
                             in
                             ExprLocation letExpr up
+
+                        CaseExprPath pattern up ->
+                            let
+                                branch =
+                                    { pattern = pattern
+                                    , expr = expr
+                                    }
+                            in
+                            CaseLocation branch up
 
                         DeclExpr pattern up ->
                             let
@@ -789,6 +873,11 @@ goDown =
                     -- modifying the name.
                     ExprLocation declaration.expr <| DeclExpr declaration.pattern up
 
+                CaseLocation branch up ->
+                    -- Similar to the above we figure going 'down' into a case, you more likely wish to
+                    -- modify the expression.
+                    ExprLocation branch.expr <| CaseExprPath branch.pattern up
+
                 ExprLocation expr up ->
                     case expr of
                         Leaf _ ->
@@ -809,6 +898,13 @@ goDown =
 
                         Let (first :: rest) inExpr ->
                             DeclLocation first <| LetDecl [] up rest inExpr
+
+                        Case [] ->
+                            -- Also should not happen, and we cannot really do anything here.
+                            location
+
+                        Case (first :: rest) ->
+                            CaseLocation first <| CaseBranchPath [] up rest
 
         updateState =
             updateStateLocation updateLocation
@@ -883,6 +979,9 @@ insertLeft =
                         DeclPattern _ _ ->
                             location
 
+                        CasePattern _ _ ->
+                            location
+
                         ModuleDeclPattern _ _ ->
                             location
 
@@ -897,6 +996,18 @@ insertLeft =
                             in
                             DeclLocation newDeclaration <|
                                 LetDecl left up (declaration :: right) inExpr
+
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath left up right ->
+                            let
+                                newBranch =
+                                    { pattern = NamePattern "_"
+                                    , expr = Leaf "Nothing"
+                                    }
+                            in
+                            CaseLocation newBranch <|
+                                CaseBranchPath left up (branch :: right)
 
                 ExprLocation expr path ->
                     case path of
@@ -914,6 +1025,9 @@ insertLeft =
                             ExprLocation expr <| LetExpr (newDeclaration :: declarations) up
 
                         DeclExpr _ _ ->
+                            location
+
+                        CaseExprPath _ _ ->
                             location
 
                         ModuleDeclExpr _ _ ->
@@ -992,6 +1106,9 @@ insertRight =
                         DeclPattern _ _ ->
                             location
 
+                        CasePattern _ _ ->
+                            location
+
                         ModuleDeclPattern _ _ ->
                             location
 
@@ -1006,6 +1123,18 @@ insertRight =
                             in
                             DeclLocation newDeclaration <|
                                 LetDecl (declaration :: left) up right inExpr
+
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath left up right ->
+                            let
+                                newBranch =
+                                    { pattern = NamePattern "R"
+                                    , expr = Leaf "Nothing"
+                                    }
+                            in
+                            CaseLocation newBranch <|
+                                CaseBranchPath (branch :: left) up right
 
                 ExprLocation expr path ->
                     case path of
@@ -1022,6 +1151,10 @@ insertRight =
                             -- I suspect this is something of a common task, it's easy enough from here anyway you simply go Right->insertRight.
                             -- In general I suspect adding a new declaration to the inner most enclosing 'let' even if you're not actually
                             -- on the outer-most 'inExpr' will be common, and we should probably have a separate task for that.
+                            location
+
+                        CaseExprPath _ _ ->
+                            -- Similarly we could interpret this as 'add a new case'.
                             location
 
                         DeclExpr _ _ ->
@@ -1082,6 +1215,9 @@ moveLeft =
                         LetExpr (l :: left) up ->
                             location
 
+                        CaseExprPath _ _ ->
+                            location
+
                         DeclExpr pattern up ->
                             location
 
@@ -1097,6 +1233,15 @@ moveLeft =
                             DeclLocation declaration <|
                                 LetDecl left up (l :: right) expr
 
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath [] _ _ ->
+                            location
+
+                        CaseBranchPath (l :: left) up right ->
+                            CaseLocation branch <|
+                                CaseBranchPath left up (l :: right)
+
                 PatternLocation pattern path ->
                     case path of
                         ApplyPatternPath [] _ _ ->
@@ -1105,6 +1250,9 @@ moveLeft =
                         ApplyPatternPath (l :: left) up right ->
                             PatternLocation pattern <|
                                 ApplyPatternPath left up (l :: right)
+
+                        CasePattern _ _ ->
+                            location
 
                         DeclPattern _ _ ->
                             location
@@ -1199,6 +1347,9 @@ moveRight =
                         DeclPattern up expr ->
                             location
 
+                        CasePattern _ _ ->
+                            location
+
                         ModuleDeclPattern up expr ->
                             location
 
@@ -1209,6 +1360,15 @@ moveRight =
 
                         LetDecl left up (r :: right) expr ->
                             DeclLocation declaration <| LetDecl (r :: left) up right expr
+
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath _ _ [] ->
+                            location
+
+                        CaseBranchPath left up (r :: right) ->
+                            CaseLocation branch <|
+                                CaseBranchPath (r :: left) up right
 
                 ExprLocation expr path ->
                     case path of
@@ -1222,6 +1382,9 @@ moveRight =
                             location
 
                         DeclExpr _ _ ->
+                            location
+
+                        CaseExprPath _ _ ->
                             location
 
                         ModuleDeclExpr _ _ ->
@@ -1265,6 +1428,9 @@ promoteLet =
                     location
 
                 DeclLocation _ _ ->
+                    location
+
+                CaseLocation _ _ ->
                     location
 
                 ExprLocation (Let _ _) _ ->
@@ -1345,6 +1511,9 @@ insertTypeDecl =
                 DeclLocation _ _ ->
                     location
 
+                CaseLocation _ _ ->
+                    location
+
                 ExprLocation (Let _ _) _ ->
                     location
 
@@ -1398,6 +1567,10 @@ cutAction =
                             -- You cannot cut the expression from a let.
                             editorState
 
+                        CaseExprPath _ _ ->
+                            -- You cannot cut the expression out of a branch
+                            editorState
+
                         DeclExpr _ _ ->
                             -- You cannot cut the expression from a declaration.
                             editorState
@@ -1405,6 +1578,25 @@ cutAction =
                         ModuleDeclExpr _ _ ->
                             -- You cannot cut the expression from a module declaration
                             editorState
+
+                CaseLocation branch path ->
+                    case path of
+                        CaseBranchPath [] _ [] ->
+                            -- You cannot cut the very last branch of this expression.
+                            -- want a way to turn the last branch into *just* its expression, but this is not it.
+                            editorState
+
+                        CaseBranchPath [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                CaseLocation r <| CaseBranchPath [] up right
+                            }
+
+                        CaseBranchPath (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                CaseLocation l <| CaseBranchPath left up right
+                            }
 
                 DeclLocation valueDecl path ->
                     case path of
@@ -1446,6 +1638,9 @@ cutAction =
                             , location =
                                 PatternLocation r <| ApplyPatternPath [] up right
                             }
+
+                        CasePattern _ _ ->
+                            editorState
 
                         DeclPattern _ _ ->
                             editorState
@@ -1598,6 +1793,11 @@ pasteAction =
                                 | location = ExprLocation expr path
                             }
 
+                        ( CaseLocation _ path, CaseLocation branch _ ) ->
+                            { editorState
+                                | location = CaseLocation branch path
+                            }
+
                         ( DeclLocation _ path, DeclLocation valueDecl _ ) ->
                             { editorState
                                 | location = DeclLocation valueDecl path
@@ -1646,6 +1846,9 @@ pasteAction =
                         -- I'm just spelling all of these out so that I get a compiler warning to update the above
                         -- (and below) whenever we add a location kind.
                         ( ExprLocation _ _, _ ) ->
+                            editorState
+
+                        ( CaseLocation _ _, _ ) ->
                             editorState
 
                         ( DeclLocation _ _, _ ) ->
@@ -1737,6 +1940,9 @@ update msg model =
                                 Let _ _ ->
                                     Cmd.none
 
+                                Case _ ->
+                                    Cmd.none
+
                         PatternLocation pattern _ ->
                             case pattern of
                                 NamePattern _ ->
@@ -1771,6 +1977,9 @@ update msg model =
                             Cmd.none
 
                         DeclLocation _ _ ->
+                            Cmd.none
+
+                        CaseLocation _ _ ->
                             Cmd.none
             in
             ( newModel, command )
@@ -1823,6 +2032,9 @@ update msg model =
                         PatternLocation _ _ ->
                             model
 
+                        CaseLocation _ _ ->
+                            model
+
                         DeclLocation _ _ ->
                             model
 
@@ -1850,6 +2062,11 @@ withCommands model commands =
 upList : List a -> a -> List a -> List a
 upList left hole right =
     List.reverse left ++ (hole :: right)
+
+
+mapUpList : (a -> b) -> List a -> b -> List a -> List b
+mapUpList fun left hole right =
+    upList (List.map fun left) hole (List.map fun right)
 
 
 view : Model -> Browser.Document Msg
@@ -1994,14 +2211,69 @@ viewExpr expr =
             text s
 
         Apply children ->
-            viewApply <| List.map viewExpr children
+            layoutApply <| List.map viewExpr children
 
         Let declarations inExpr ->
-            viewLet (viewDeclarationList declarations) (viewExpr inExpr)
+            layoutLet (viewDeclarationList declarations) (viewExpr inExpr)
+
+        Case branches ->
+            layoutCase <| List.map viewCaseBranch branches
 
 
-viewLet : List (Element msg) -> Element msg -> Element msg
-viewLet declarations expr =
+indentation : Element msg
+indentation =
+    Element.el
+        [ Element.width <| Element.px 20
+        , Element.height Element.fill
+
+        -- TODO: I could make the indentation just a very subtle off-color, or with a very subtle border, perhaps only on the left.
+        , Background.color themeColor2
+        ]
+        (text "")
+
+
+layoutCaseBranch : Element msg -> Element msg -> Element msg
+layoutCaseBranch pattern expr =
+    Element.column
+        [ Element.spacing 5 ]
+        [ Element.row
+            [ Element.spacing 5 ]
+            [ pattern
+            , viewPunctuation "->"
+            ]
+        , Element.row
+            []
+            [ indentation, expr ]
+        ]
+
+
+viewCaseBranch : CaseBranch -> Element msg
+viewCaseBranch branch =
+    layoutCaseBranch (viewPattern branch.pattern) (viewExpr branch.expr)
+
+
+layoutCase : List (Element msg) -> Element msg
+layoutCase branches =
+    Element.column
+        [ Element.spacing 5 ]
+        [ Element.row
+            []
+            [ viewKeyword "case"
+            , text "expr"
+            , viewKeyword "of"
+            ]
+        , Element.row
+            []
+            [ indentation
+            , Element.column
+                [ Element.spacing 5 ]
+                branches
+            ]
+        ]
+
+
+layoutLet : List (Element msg) -> Element msg -> Element msg
+layoutLet declarations expr =
     Element.column
         [ classAttribute "let" ]
         [ viewKeyword "let"
@@ -2063,13 +2335,15 @@ viewPattern pattern =
             text s
 
         ApplyPattern patterns ->
-            viewApply <| List.map viewPattern patterns
+            layoutApply <| List.map viewPattern patterns
 
 
-viewApply : List (Element msg) -> Element msg
-viewApply =
+layoutApply : List (Element msg) -> Element msg
+layoutApply =
     Element.wrappedRow
-        [ Element.spacing 4 ]
+        [ Element.spacing 4
+        , Element.width Element.fill
+        ]
 
 
 
@@ -2085,24 +2359,18 @@ viewExprPath viewed path =
     case path of
         ApplyPath left up right ->
             let
-                leftViewed =
-                    List.map viewExpr left
-
-                rightViewed =
-                    List.map viewExpr right
-
                 children =
-                    upList leftViewed viewed rightViewed
+                    mapUpList viewExpr left viewed right
 
                 child =
-                    viewApply children
+                    layoutApply children
             in
             viewExprPath child up
 
         LetExpr declarations up ->
             let
                 child =
-                    viewLet (List.reverse <| viewDeclarationList declarations) viewed
+                    layoutLet (List.reverse <| viewDeclarationList declarations) viewed
             in
             viewExprPath child up
 
@@ -2113,6 +2381,13 @@ viewExprPath viewed path =
             in
             viewDeclPath child up
 
+        CaseExprPath pattern up ->
+            let
+                child =
+                    layoutCaseBranch (viewPattern pattern) viewed
+            in
+            viewCaseBranchPath child up
+
         ModuleDeclExpr pattern up ->
             let
                 child =
@@ -2121,22 +2396,30 @@ viewExprPath viewed path =
             viewModuleDeclPath child up
 
 
+viewCaseBranchPath : Element msg -> CaseBranchPath -> Element msg
+viewCaseBranchPath viewed path =
+    case path of
+        CaseBranchPath left up right ->
+            let
+                branches =
+                    mapUpList viewCaseBranch left viewed right
+
+                child =
+                    layoutCase branches
+            in
+            viewExprPath child up
+
+
 viewDeclPath : Element msg -> DeclPath -> Element msg
 viewDeclPath viewed path =
     case path of
         LetDecl left up right expr ->
             let
-                leftViewed =
-                    viewDeclarationList left
-
-                rightViewed =
-                    viewDeclarationList right
-
                 declarations =
-                    upList leftViewed viewed rightViewed
+                    mapUpList viewDeclaration left viewed right
 
                 child =
-                    viewLet declarations <| viewExpr expr
+                    layoutLet declarations <| viewExpr expr
             in
             viewExprPath child up
 
@@ -2146,19 +2429,20 @@ viewPatternPath viewed path =
     case path of
         ApplyPatternPath left up right ->
             let
-                leftViewed =
-                    List.map viewPattern left
-
-                rightViewed =
-                    List.map viewPattern right
-
                 children =
-                    upList leftViewed viewed rightViewed
+                    mapUpList viewPattern left viewed right
 
                 child =
-                    viewApply children
+                    layoutApply children
             in
             viewPatternPath child up
+
+        CasePattern up expr ->
+            let
+                child =
+                    layoutCaseBranch viewed <| viewExpr expr
+            in
+            viewCaseBranchPath child up
 
         DeclPattern up expr ->
             let
@@ -2525,6 +2809,14 @@ viewLocation location =
                             viewHighlighted <| viewExpr expr
             in
             viewExprPath viewed path
+
+        CaseLocation branch path ->
+            let
+                viewed =
+                    viewHighlighted <|
+                        viewCaseBranch branch
+            in
+            viewCaseBranchPath viewed path
 
         DeclLocation declaration path ->
             let
