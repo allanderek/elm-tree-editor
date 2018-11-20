@@ -1963,9 +1963,9 @@ header editorState =
         ]
 
 
-indentElement : Element.Attr decorative msg
+indentElement : Element.Attribute msg
 indentElement =
-    Element.moveRight 20
+    Element.paddingEach { left = 20, right = 0, top = 0, bottom = 0 }
 
 
 viewKeyword : String -> Element msg
