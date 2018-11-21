@@ -2295,16 +2295,26 @@ mapUpList fun left hole right =
 view : Model -> Browser.Document Msg
 view model =
     let
-        body =
+        controls =
             Element.column
+                []
+                [ header model.editorState
+                , viewClipboard model.editorState
+                ]
+
+        mainContent =
+            viewLocation model.editorState.location
+
+        body =
+            Element.row
                 [ Element.width Element.fill
                 , Element.spacing 10
                 , Element.padding 10
                 , Background.color themeColor2
                 , Font.color themeColor5
                 ]
-                [ header model.editorState
-                , viewLocation model.editorState.location
+                [ Element.el [ Element.width <| Element.fillPortion 3 ] controls
+                , Element.el [ Element.width <| Element.fillPortion 7 ] mainContent
                 ]
     in
     { title = "Tree source editing with Elm"
@@ -2384,7 +2394,8 @@ header editorState =
                     button title Nothing
     in
     Element.wrappedRow
-        [ Element.width Element.fill
+        [ Element.height Element.fill
+        , Element.width Element.fill
         , Element.spaceEvenly
         ]
         [ makeButton goUp "Up"
@@ -2972,18 +2983,63 @@ viewFocusedLeaf contents =
         }
 
 
+viewModule : Module -> Element msg
+viewModule moduleTerm =
+    let
+        declarations =
+            List.map viewModuleDeclaration moduleTerm.declarations
+
+        heading =
+            viewModuleHeading moduleTerm.name moduleTerm.exports moduleTerm.imports
+    in
+    layoutModule heading declarations
+
+
+viewClipboard : EditorState -> Element msg
+viewClipboard editorState =
+    case editorState.clipBoard of
+        Nothing ->
+            text "Clipboard empty"
+
+        Just (ExprLocation expr _) ->
+            viewExpr expr
+
+        Just (CaseLocation branch _) ->
+            viewCaseBranch branch
+
+        Just (DeclLocation valueDecl _) ->
+            viewDeclaration valueDecl
+
+        Just (PatternLocation pattern _) ->
+            viewPattern pattern
+
+        Just (TypeExprLocation typeExpr _) ->
+            viewTypeExpr typeExpr
+
+        Just (TypePatternLocation typePattern _) ->
+            viewTypePattern typePattern
+
+        Just (ModuleImportLocation importTerm _) ->
+            viewImport importTerm
+
+        Just (ExportLocation export _) ->
+            viewExport export
+
+        Just (ModuleNameLocation name _) ->
+            text name
+
+        Just (ModuleDeclLocation moduleDecl _) ->
+            viewModuleDeclaration moduleDecl
+
+        Just (ModuleLocation moduleTerm) ->
+            viewModule moduleTerm
+
+
 viewLocation : Location -> Element Msg
 viewLocation location =
     case location of
         ModuleLocation moduleTerm ->
-            let
-                declarations =
-                    List.map viewModuleDeclaration moduleTerm.declarations
-
-                heading =
-                    viewModuleHeading moduleTerm.name moduleTerm.exports moduleTerm.imports
-            in
-            viewHighlighted <| layoutModule heading declarations
+            viewHighlighted <| viewModule moduleTerm
 
         ModuleImportLocation importTerm path ->
             let
