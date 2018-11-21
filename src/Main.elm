@@ -154,12 +154,15 @@ type ModuleImportPath
     = ModuleImportPath ModuleName (List Export) (List Import) (List Import) (List ModuleDeclaration)
 
 
-type ModuleExportPath
+type ExportPath
     = ModuleExportPath ModuleName (List Export) (List Export) (List Import) (List ModuleDeclaration)
+    | ImportExposingPath ModuleName (Maybe ModuleName) (List Export) ModuleImportPath (List Export)
 
 
 type ModuleNamePath
     = ModuleNamePath (List Export) (List Import) (List ModuleDeclaration)
+    | ModuleImportNamePath ModuleImportPath (Maybe ModuleName) (List Export)
+    | ModuleImportAsPath ImportName ModuleImportPath (List Export)
 
 
 type PatternPath
@@ -202,17 +205,19 @@ type alias Export =
     }
 
 
-
--- TODO: Obviously should be more complicated than this, in particular can have an 'as' clause
--- and can have an exposing clause.
-
-
 type alias Import =
-    String
+    { name : ImportName
+    , asName : Maybe String
+    , exports : List Export
+    }
 
 
 type alias ModuleName =
     String
+
+
+type alias ImportName =
+    ModuleName
 
 
 type alias Module =
@@ -231,7 +236,7 @@ type Location
     | TypeExprLocation TypeExpr TypeExprPath
     | TypePatternLocation TypePattern TypePatternPath
     | ModuleImportLocation Import ModuleImportPath
-    | ModuleExportLocation Export ModuleExportPath
+    | ExportLocation Export ExportPath
     | ModuleNameLocation ModuleName ModuleNamePath
     | ModuleDeclLocation ModuleDeclaration ModuleDeclPath
     | ModuleLocation Module
@@ -268,7 +273,12 @@ initialLocation =
                 , { name = "update", exportConstructors = False }
                 , { name = "Msg", exportConstructors = True }
                 ]
-            , imports = [ "Html", "Html.Attributes", "Html.Events" ]
+            , imports =
+                [ { name = "Html", asName = Nothing, exports = [] }
+                , { name = "Html.Attributes", asName = Just "Attributes", exports = [ { name = "class", exportConstructors = False } ] }
+                , { name = "Html.Events", asName = Just "Attributes", exports = [ { name = "onClick", exportConstructors = False } ] }
+                , { name = "Maybe", asName = Nothing, exports = [ { name = "Maybe", exportConstructors = True } ] }
+                ]
             , declarations = [ typeDecl, moduleDecl ]
             }
     in
@@ -334,20 +344,39 @@ goLeft =
                 ModuleLocation _ ->
                     location
 
-                ModuleNameLocation _ path ->
+                ModuleNameLocation moduleName path ->
                     case path of
                         ModuleNamePath _ _ _ ->
                             location
 
-                ModuleExportLocation export path ->
+                        ModuleImportNamePath _ _ _ ->
+                            location
+
+                        ModuleImportAsPath importName up exports ->
+                            ModuleNameLocation importName <|
+                                ModuleImportNamePath up (Just moduleName) exports
+
+                ExportLocation export path ->
                     case path of
                         ModuleExportPath moduleName [] right imports declarations ->
                             ModuleNameLocation moduleName <|
                                 ModuleNamePath (export :: right) imports declarations
 
                         ModuleExportPath moduleName (l :: left) right imports declarations ->
-                            ModuleExportLocation l <|
+                            ExportLocation l <|
                                 ModuleExportPath moduleName left (export :: right) imports declarations
+
+                        ImportExposingPath moduleName Nothing [] up right ->
+                            ModuleNameLocation moduleName <|
+                                ModuleImportNamePath up Nothing (export :: right)
+
+                        ImportExposingPath moduleName (Just asName) [] up right ->
+                            ModuleNameLocation asName <|
+                                ModuleImportAsPath moduleName up (export :: right)
+
+                        ImportExposingPath moduleName mAsName (l :: left) up right ->
+                            ExportLocation l <|
+                                ImportExposingPath moduleName mAsName left up (export :: right)
 
                 ModuleImportLocation importTerm path ->
                     case path of
@@ -362,7 +391,7 @@ goLeft =
                                         ModuleNamePath [] (importTerm :: right) declarations
 
                                 export :: leftExports ->
-                                    ModuleExportLocation export <|
+                                    ExportLocation export <|
                                         ModuleExportPath moduleName leftExports [] (importTerm :: right) declarations
 
                 ModuleDeclLocation mDecl path ->
@@ -379,7 +408,7 @@ goLeft =
                                 [] ->
                                     case List.reverse exports of
                                         export :: leftExports ->
-                                            ModuleExportLocation export <|
+                                            ExportLocation export <|
                                                 ModuleExportPath moduleName leftExports [] imports (mDecl :: right)
 
                                         [] ->
@@ -487,10 +516,28 @@ goRight =
                                 ModuleImportPath moduleName [] [] imports declarations
 
                         ModuleNamePath (export :: exports) imports declarations ->
-                            ModuleExportLocation export <|
+                            ExportLocation export <|
                                 ModuleExportPath moduleName [] exports imports declarations
 
-                ModuleExportLocation export path ->
+                        ModuleImportNamePath up Nothing [] ->
+                            location
+
+                        ModuleImportNamePath up Nothing (export :: exports) ->
+                            ExportLocation export <|
+                                ImportExposingPath moduleName Nothing [] up exports
+
+                        ModuleImportNamePath up (Just asName) exports ->
+                            ModuleNameLocation asName <|
+                                ModuleImportAsPath moduleName up exports
+
+                        ModuleImportAsPath importName up [] ->
+                            location
+
+                        ModuleImportAsPath importName up (export :: exports) ->
+                            ExportLocation export <|
+                                ImportExposingPath importName (Just moduleName) [] up exports
+
+                ExportLocation export path ->
                     case path of
                         ModuleExportPath moduleName left [] [] [] ->
                             location
@@ -512,8 +559,15 @@ goRight =
                                 ModuleImportPath moduleName exports [] imports declarations
 
                         ModuleExportPath moduleName left (r :: right) imports declarations ->
-                            ModuleExportLocation r <|
+                            ExportLocation r <|
                                 ModuleExportPath moduleName (export :: left) right imports declarations
+
+                        ImportExposingPath importName mAsName left up [] ->
+                            location
+
+                        ImportExposingPath importName mAsName left up (r :: right) ->
+                            ExportLocation r <|
+                                ImportExposingPath importName mAsName (r :: left) up right
 
                 ModuleImportLocation importTerm path ->
                     case path of
@@ -641,7 +695,7 @@ goUp =
                             in
                             ModuleLocation moduleTerm
 
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
                     case path of
                         ModuleExportPath moduleName left right imports declarations ->
                             let
@@ -653,6 +707,16 @@ goUp =
                                     }
                             in
                             ModuleLocation moduleTerm
+
+                        ImportExposingPath importName mAsName left up right ->
+                            let
+                                importTerm =
+                                    { name = importName
+                                    , asName = mAsName
+                                    , exports = upList left export right
+                                    }
+                            in
+                            ModuleImportLocation importTerm up
 
                 ModuleNameLocation moduleName path ->
                     case path of
@@ -666,6 +730,26 @@ goUp =
                                     }
                             in
                             ModuleLocation moduleTerm
+
+                        ModuleImportNamePath up mAsName exports ->
+                            let
+                                importTerm =
+                                    { name = moduleName
+                                    , asName = mAsName
+                                    , exports = exports
+                                    }
+                            in
+                            ModuleImportLocation importTerm up
+
+                        ModuleImportAsPath importName up exports ->
+                            let
+                                importTerm =
+                                    { name = importName
+                                    , asName = Just moduleName
+                                    , exports = exports
+                                    }
+                            in
+                            ModuleImportLocation importTerm up
 
                 ModuleDeclLocation mDecl path ->
                     case path of
@@ -842,17 +926,18 @@ goDown =
                                 [] ->
                                     case moduleTerm.exports of
                                         export :: exports ->
-                                            ModuleExportLocation export <|
+                                            ExportLocation export <|
                                                 ModuleExportPath moduleTerm.name [] exports moduleTerm.imports moduleTerm.declarations
 
                                         [] ->
                                             ModuleNameLocation moduleTerm.name <|
                                                 ModuleNamePath moduleTerm.exports moduleTerm.imports moduleTerm.declarations
 
-                ModuleImportLocation _ _ ->
-                    location
+                ModuleImportLocation importTerm path ->
+                    ModuleNameLocation importTerm.name <|
+                        ModuleImportNamePath path importTerm.asName importTerm.exports
 
-                ModuleExportLocation _ _ ->
+                ExportLocation _ _ ->
                     location
 
                 ModuleNameLocation _ _ ->
@@ -950,22 +1035,29 @@ insertLeft =
                         ModuleImportPath moduleName exports left right declarations ->
                             let
                                 newImport =
-                                    "Left"
+                                    { name = "Left"
+                                    , asName = Nothing
+                                    , exports = []
+                                    }
                             in
                             ModuleImportLocation newImport <|
                                 ModuleImportPath moduleName exports left (importTerm :: right) declarations
 
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
+                    let
+                        newExport =
+                            { name = "left"
+                            , exportConstructors = False
+                            }
+                    in
                     case path of
                         ModuleExportPath moduleName left right imports declarations ->
-                            let
-                                newExport =
-                                    { name = "left"
-                                    , exportConstructors = False
-                                    }
-                            in
-                            ModuleExportLocation newExport <|
+                            ExportLocation newExport <|
                                 ModuleExportPath moduleName left (export :: right) imports declarations
+
+                        ImportExposingPath importName mAsName left up right ->
+                            ExportLocation newExport <|
+                                ImportExposingPath importName mAsName left up (export :: right)
 
                 ModuleNameLocation _ _ ->
                     location
@@ -1080,22 +1172,29 @@ insertRight =
                         ModuleImportPath moduleName exports left right declarations ->
                             let
                                 newImport =
-                                    "Right"
+                                    { name = "Right"
+                                    , asName = Nothing
+                                    , exports = []
+                                    }
                             in
                             ModuleImportLocation newImport <|
                                 ModuleImportPath moduleName exports (importTerm :: left) right declarations
 
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
+                    let
+                        newExport =
+                            { name = "right"
+                            , exportConstructors = False
+                            }
+                    in
                     case path of
                         ModuleExportPath moduleName left right imports declarations ->
-                            let
-                                newExport =
-                                    { name = "right"
-                                    , exportConstructors = False
-                                    }
-                            in
-                            ModuleExportLocation newExport <|
+                            ExportLocation newExport <|
                                 ModuleExportPath moduleName (export :: left) right imports declarations
+
+                        ImportExposingPath importName mAsName left up right ->
+                            ExportLocation newExport <|
+                                ImportExposingPath importName mAsName (export :: left) up right
 
                 ModuleNameLocation _ _ ->
                     location
@@ -1216,13 +1315,20 @@ moveLeft =
                         ModuleImportPath moduleName exports [] right declarations ->
                             location
 
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
                     case path of
                         ModuleExportPath moduleName (l :: left) right imports declarations ->
-                            ModuleExportLocation export <|
+                            ExportLocation export <|
                                 ModuleExportPath moduleName left (l :: right) imports declarations
 
                         ModuleExportPath moduleName [] right imports declarations ->
+                            location
+
+                        ImportExposingPath importName mAsName (l :: left) up right ->
+                            ExportLocation export <|
+                                ImportExposingPath importName mAsName left up (l :: right)
+
+                        ImportExposingPath importName mAsName [] up right ->
                             location
 
                 ModuleNameLocation _ _ ->
@@ -1335,13 +1441,20 @@ moveRight =
                         ModuleImportPath moduleName exports left [] declarations ->
                             location
 
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
                     case path of
                         ModuleExportPath moduleName left (r :: right) imports declarations ->
-                            ModuleExportLocation export <|
+                            ExportLocation export <|
                                 ModuleExportPath moduleName (r :: left) right imports declarations
 
                         ModuleExportPath moduleName left [] imports declarations ->
+                            location
+
+                        ImportExposingPath importName mAsName left up (r :: right) ->
+                            ExportLocation export <|
+                                ImportExposingPath importName mAsName (r :: left) up right
+
+                        ImportExposingPath importName mAsName left up [] ->
                             location
 
                 ModuleNameLocation _ _ ->
@@ -1443,7 +1556,7 @@ promoteLet =
                 ModuleImportLocation _ _ ->
                     location
 
-                ModuleExportLocation _ _ ->
+                ExportLocation _ _ ->
                     location
 
                 ModuleNameLocation _ _ ->
@@ -1527,7 +1640,7 @@ insertTypeDecl =
                 ModuleImportLocation _ _ ->
                     location
 
-                ModuleExportLocation _ _ ->
+                ExportLocation _ _ ->
                     location
 
                 ModuleNameLocation _ _ ->
@@ -1567,7 +1680,7 @@ toggleExportConstructors =
     let
         updateLocation location =
             case location of
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
                     let
                         -- Note: we could prevent someone from toggling this if the first character of the name
                         -- is not an upper case character. However, note that if we do that, it's still possible to
@@ -1579,7 +1692,7 @@ toggleExportConstructors =
                         newExport =
                             { export | exportConstructors = not export.exportConstructors }
                     in
-                    ModuleExportLocation newExport path
+                    ExportLocation newExport path
 
                 ExprLocation _ _ ->
                     location
@@ -1815,16 +1928,16 @@ cutAction =
                     , location = newLocation
                     }
 
-                ModuleExportLocation export path ->
+                ExportLocation export path ->
                     let
                         newLocation =
                             case path of
                                 ModuleExportPath moduleName left (r :: right) imports declarations ->
-                                    ModuleExportLocation r <|
+                                    ExportLocation r <|
                                         ModuleExportPath moduleName left right imports declarations
 
                                 ModuleExportPath moduleName (l :: left) [] imports declarations ->
-                                    ModuleExportLocation l <|
+                                    ExportLocation l <|
                                         ModuleExportPath moduleName left [] imports declarations
 
                                 ModuleExportPath moduleName [] [] imports (decl :: declarations) ->
@@ -1838,6 +1951,22 @@ cutAction =
                                 ModuleExportPath moduleName [] [] [] [] ->
                                     ModuleNameLocation moduleName <|
                                         ModuleNamePath [] [] []
+
+                                ImportExposingPath importName mAsName (l :: left) up right ->
+                                    ExportLocation l <|
+                                        ImportExposingPath importName mAsName left up right
+
+                                ImportExposingPath importName mAsName [] up (r :: right) ->
+                                    ExportLocation r <|
+                                        ImportExposingPath importName mAsName [] up right
+
+                                ImportExposingPath importName (Just asName) [] up [] ->
+                                    ModuleNameLocation asName <|
+                                        ModuleImportAsPath importName up []
+
+                                ImportExposingPath importName Nothing [] up [] ->
+                                    ModuleNameLocation importName <|
+                                        ModuleImportNamePath up Nothing []
                     in
                     { clipBoard = Just editorState.location
                     , location = newLocation
@@ -1928,9 +2057,9 @@ pasteAction =
                                 | location = ModuleImportLocation importTerm path
                             }
 
-                        ( ModuleExportLocation _ path, ModuleExportLocation export _ ) ->
+                        ( ExportLocation _ path, ExportLocation export _ ) ->
                             { editorState
-                                | location = ModuleExportLocation export path
+                                | location = ExportLocation export path
                             }
 
                         ( ModuleNameLocation _ path, ModuleNameLocation name _ ) ->
@@ -1961,7 +2090,7 @@ pasteAction =
                         ( ModuleImportLocation _ _, _ ) ->
                             editorState
 
-                        ( ModuleExportLocation _ _, _ ) ->
+                        ( ExportLocation _ _, _ ) ->
                             editorState
 
                         ( ModuleNameLocation _ _, _ ) ->
@@ -2059,7 +2188,7 @@ update msg model =
                         ModuleImportLocation _ _ ->
                             focusLeafBox
 
-                        ModuleExportLocation _ _ ->
+                        ExportLocation _ _ ->
                             focusLeafBox
 
                         ModuleNameLocation _ _ ->
@@ -2113,13 +2242,12 @@ update msg model =
                             updateLocation <|
                                 ModuleNameLocation content path
 
-                        ModuleImportLocation _ path ->
+                        ExportLocation export path ->
                             updateLocation <|
-                                ModuleImportLocation content path
+                                ExportLocation { export | name = content } path
 
-                        ModuleExportLocation export path ->
-                            updateLocation <|
-                                ModuleExportLocation { export | name = content } path
+                        ModuleImportLocation _ _ ->
+                            model
 
                         ExprLocation _ _ ->
                             model
@@ -2650,6 +2778,20 @@ viewModuleDeclPath viewed path =
             layoutModule heading declarations
 
 
+viewModuleImportPath : Element msg -> ModuleImportPath -> Element msg
+viewModuleImportPath viewed path =
+    case path of
+        ModuleImportPath moduleName exports left right declarations ->
+            let
+                heading =
+                    layoutModuleHeading
+                        (viewNameRow moduleName)
+                        (viewExports "Nothing exposed" exports)
+                        (layoutImports <| mapUpList viewImport left viewed right)
+            in
+            layoutModule heading <| List.map viewModuleDeclaration declarations
+
+
 layoutExport : Element msg -> Bool -> Element msg
 layoutExport name exportConstructors =
     case exportConstructors of
@@ -2669,20 +2811,21 @@ viewExport export =
     layoutExport (text export.name) export.exportConstructors
 
 
-layoutExports : List (Element msg) -> Element msg
-layoutExports exports =
+layoutExports : String -> List (Element msg) -> Element msg
+layoutExports emptyText exports =
     case exports of
         [] ->
             Element.el
                 [ indentElement
                 , Font.light
                 ]
-                (text "No exports")
+                (text emptyText)
 
         [ only ] ->
             Element.row
                 [ indentElement ]
-                [ viewPunctuation "("
+                [ viewKeyword "exposing"
+                , viewPunctuation "("
                 , only
                 , viewPunctuation ")"
                 ]
@@ -2707,26 +2850,47 @@ layoutExports exports =
             in
             Element.column
                 [ indentElement ]
-                (viewedFirst :: viewedOthers ++ [ closing ])
+                (viewKeyword "exposing" :: viewedFirst :: viewedOthers ++ [ closing ])
 
 
-viewExports : List Export -> Element msg
-viewExports exports =
-    layoutExports <| List.map viewExport exports
+viewExports : String -> List Export -> Element msg
+viewExports emptyText exports =
+    layoutExports emptyText <| List.map viewExport exports
 
 
-layoutImport : Element msg -> Element msg
-layoutImport importTerm =
-    Element.row
+layoutImport : Element msg -> Maybe (Element msg) -> Element msg -> Element msg
+layoutImport importName mAsName exports =
+    let
+        asTerm =
+            case mAsName of
+                Nothing ->
+                    Element.none
+
+                Just name ->
+                    Element.row
+                        [ Element.spacing 5 ]
+                        [ viewKeyword "as"
+                        , name
+                        ]
+    in
+    Element.column
         [ Element.spacing 5 ]
-        [ viewKeyword "import"
-        , importTerm
+        [ Element.row
+            [ Element.spacing 5 ]
+            [ viewKeyword "import"
+            , importName
+            , asTerm
+            ]
+        , exports
         ]
 
 
 viewImport : Import -> Element msg
 viewImport importTerm =
-    layoutImport <| text importTerm
+    layoutImport
+        (text importTerm.name)
+        (Maybe.map text importTerm.asName)
+        (viewExports "Nothing exposed" importTerm.exports)
 
 
 layoutImports : List (Element msg) -> Element msg
@@ -2769,7 +2933,7 @@ viewModuleHeading : ModuleName -> List Export -> List Import -> Element msg
 viewModuleHeading moduleName exports imports =
     layoutModuleHeading
         (viewNameRow moduleName)
-        (viewExports exports)
+        (viewExports "No exports" exports)
         (viewImports imports)
 
 
@@ -2824,26 +2988,11 @@ viewLocation location =
         ModuleImportLocation importTerm path ->
             let
                 viewed =
-                    layoutImport <| viewFocusedLeaf importTerm
+                    viewHighlighted <| viewImport importTerm
             in
-            case path of
-                ModuleImportPath moduleName exports left right declarations ->
-                    let
-                        viewedLeft =
-                            List.map viewImport left
+            viewModuleImportPath viewed path
 
-                        viewedRight =
-                            List.map viewImport right
-
-                        heading =
-                            layoutModuleHeading
-                                (viewNameRow moduleName)
-                                (viewExports exports)
-                                (layoutImports <| upList viewedLeft viewed viewedRight)
-                    in
-                    layoutModule heading <| List.map viewModuleDeclaration declarations
-
-        ModuleExportLocation exportTerm path ->
+        ExportLocation exportTerm path ->
             let
                 viewed =
                     layoutExport (viewFocusedLeaf exportTerm.name) exportTerm.exportConstructors
@@ -2851,34 +3000,59 @@ viewLocation location =
             case path of
                 ModuleExportPath moduleName left right imports declarations ->
                     let
-                        viewedLeft =
-                            List.map viewExport left
-
-                        viewedRight =
-                            List.map viewExport right
-
                         heading =
                             layoutModuleHeading
                                 (viewNameRow moduleName)
-                                (layoutExports <| upList viewedLeft viewed viewedRight)
+                                (layoutExports "Nothing exported" <| mapUpList viewExport left viewed right)
                                 (viewImports imports)
                     in
                     layoutModule heading <| List.map viewModuleDeclaration declarations
 
+                ImportExposingPath importName mAsName left up right ->
+                    let
+                        viewedImport =
+                            layoutImport
+                                (text importName)
+                                (Maybe.map text mAsName)
+                                (layoutExports "Nothing exposed" <| mapUpList viewExport left viewed right)
+                    in
+                    viewModuleImportPath viewedImport up
+
         ModuleNameLocation moduleName path ->
+            let
+                viewed =
+                    viewFocusedLeaf moduleName
+            in
             case path of
                 ModuleNamePath exports imports declarations ->
                     let
-                        viewed =
-                            viewFocusedLeaf moduleName
-
                         heading =
                             layoutModuleHeading
                                 (layoutNameRow viewed)
-                                (viewExports exports)
+                                (viewExports "Nothing exported" exports)
                                 (viewImports imports)
                     in
                     layoutModule heading <| List.map viewModuleDeclaration declarations
+
+                ModuleImportNamePath up mAsName exports ->
+                    let
+                        viewedImport =
+                            layoutImport
+                                viewed
+                                (Maybe.map text mAsName)
+                                (viewExports "Nothing exposed" exports)
+                    in
+                    viewModuleImportPath viewedImport up
+
+                ModuleImportAsPath importName up exports ->
+                    let
+                        viewedImport =
+                            layoutImport
+                                (text importName)
+                                (Just <| viewed)
+                                (viewExports "Nothing exposed" exports)
+                    in
+                    viewModuleImportPath viewedImport up
 
         ModuleDeclLocation mDecl path ->
             let
