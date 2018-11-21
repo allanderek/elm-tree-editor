@@ -263,7 +263,11 @@ initialLocation =
         moduleTerm =
             { name = "Main"
             , exports =
-                List.map (\n -> { name = n, exportConstructors = False }) [ "main", "init", "update" ]
+                [ { name = "main", exportConstructors = False }
+                , { name = "init", exportConstructors = False }
+                , { name = "update", exportConstructors = False }
+                , { name = "Msg", exportConstructors = True }
+                ]
             , imports = [ "Html", "Html.Attributes", "Html.Events" ]
             , declarations = [ typeDecl, moduleDecl ]
             }
@@ -1558,6 +1562,63 @@ insertTypeDecl =
     }
 
 
+toggleExportConstructors : Action
+toggleExportConstructors =
+    let
+        updateLocation location =
+            case location of
+                ModuleExportLocation export path ->
+                    let
+                        -- Note: we could prevent someone from toggling this if the first character of the name
+                        -- is not an upper case character. However, note that if we do that, it's still possible to
+                        -- toggle it to export the constructors and *then* change the name to a lower-case character,
+                        -- so either we would want to prevent them changing the name or at least allow them to toggle
+                        -- exporting constructors *off* regardless fo what the current name is. All-in-all for now I
+                        -- don't think this is worth it, so I'm happy to just let the user make that mistake or not.
+                        -- I'd be happy to highlight it as an error.
+                        newExport =
+                            { export | exportConstructors = not export.exportConstructors }
+                    in
+                    ModuleExportLocation newExport path
+
+                ExprLocation _ _ ->
+                    location
+
+                CaseLocation _ _ ->
+                    location
+
+                DeclLocation _ _ ->
+                    location
+
+                PatternLocation _ _ ->
+                    location
+
+                TypeExprLocation _ _ ->
+                    location
+
+                TypePatternLocation _ _ ->
+                    location
+
+                ModuleImportLocation _ _ ->
+                    location
+
+                ModuleNameLocation _ _ ->
+                    location
+
+                ModuleDeclLocation _ _ ->
+                    location
+
+                ModuleLocation _ ->
+                    location
+
+        updateState =
+            updateStateLocation updateLocation
+    in
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
+    }
+
+
 cutAction : Action
 cutAction =
     let
@@ -2211,6 +2272,7 @@ header editorState =
         , makeButton cutAction "Cut"
         , makeButton copyAction "Copy"
         , makeButton pasteAction "Paste"
+        , makeButton toggleExportConstructors "(..)"
         ]
 
 
@@ -2374,7 +2436,7 @@ viewPattern pattern =
 
 layoutApply : List (Element msg) -> Element msg
 layoutApply =
-    Element.wrappedRow
+    Element.row
         [ Element.spacing 4
         , Element.width Element.fill
         ]
@@ -2588,18 +2650,23 @@ viewModuleDeclPath viewed path =
             layoutModule heading declarations
 
 
-viewExport : Export -> Element msg
-viewExport export =
-    case export.exportConstructors of
+layoutExport : Element msg -> Bool -> Element msg
+layoutExport name exportConstructors =
+    case exportConstructors of
         False ->
-            text export.name
+            name
 
         True ->
             Element.row
                 [ Element.spacing 2 ]
-                [ text export.name
+                [ name
                 , viewPunctuation "(..)"
                 ]
+
+
+viewExport : Export -> Element msg
+viewExport export =
+    layoutExport (text export.name) export.exportConstructors
 
 
 layoutExports : List (Element msg) -> Element msg
@@ -2778,9 +2845,8 @@ viewLocation location =
 
         ModuleExportLocation exportTerm path ->
             let
-                -- TODO: we must be able to export the constructors or not
                 viewed =
-                    viewFocusedLeaf exportTerm.name
+                    layoutExport (viewFocusedLeaf exportTerm.name) exportTerm.exportConstructors
             in
             case path of
                 ModuleExportPath moduleName left right imports declarations ->
