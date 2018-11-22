@@ -100,9 +100,15 @@ type alias Fragment =
     Location
 
 
+type ApplyKind
+    = Applicative
+    | ListApply
+    | TupleApply
+
+
 type Expr
     = Leaf String
-    | Apply (List Expr)
+    | Apply ApplyKind (List Expr)
     | Let (List ValueDeclaration) Expr
     | Case Expr (List CaseBranch)
 
@@ -126,11 +132,11 @@ type alias ValueDeclaration =
 
 type Pattern
     = NamePattern String
-    | ApplyPattern (List Pattern)
+    | ApplyPattern ApplyKind (List Pattern)
 
 
 type ExprPath
-    = ApplyPath (List Expr) ExprPath (List Expr)
+    = ApplyPath ApplyKind (List Expr) ExprPath (List Expr)
     | LetExpr (List ValueDeclaration) ExprPath
     | CaseExprPath ExprPath (List CaseBranch)
     | BranchExprPath Pattern CaseBranchPath
@@ -166,7 +172,7 @@ type ModuleNamePath
 
 
 type PatternPath
-    = ApplyPatternPath (List Pattern) PatternPath (List Pattern)
+    = ApplyPatternPath ApplyKind (List Pattern) PatternPath (List Pattern)
     | CasePattern CaseBranchPath Expr
     | DeclPattern DeclPath Expr
     | ModuleDeclPattern ModuleDeclPath Expr
@@ -247,15 +253,18 @@ initialLocation =
     let
         expr =
             Let
-                [ { pattern = ApplyPattern [ NamePattern "Just", NamePattern "a" ], expr = Apply [ Leaf "Just", Leaf "1" ] }
+                [ { pattern = ApplyPattern Applicative [ NamePattern "Just", NamePattern "a" ], expr = Apply Applicative [ Leaf "Just", Leaf "1" ] }
                 , { pattern = NamePattern "b", expr = Leaf "2" }
                 , { pattern = NamePattern "c", expr = Leaf "3" }
                 , { pattern = NamePattern "d", expr = Leaf "4" }
+                , { pattern = ApplyPattern ListApply [ NamePattern "a", NamePattern "b", NamePattern "c" ]
+                  , expr = Apply ListApply [ Leaf "1", Leaf "2", Leaf "3" ]
+                  }
                 ]
                 (Case
-                    (Apply [ Leaf "Other.blah", Leaf "strong" ])
-                    [ { pattern = NamePattern "Just a", expr = Apply [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ] }
-                    , { pattern = NamePattern "Nothing", expr = Leaf "[]" }
+                    (Apply Applicative [ Leaf "Other.blah", Leaf "strong" ])
+                    [ { pattern = ApplyPattern Applicative [ NamePattern "Just", NamePattern "a" ], expr = Apply Applicative [ Leaf "a", Leaf "b", Leaf "c", Leaf "d" ] }
+                    , { pattern = NamePattern "Nothing", expr = Apply ListApply [] }
                     ]
                 )
 
@@ -416,11 +425,11 @@ goLeft =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath [] _ _ ->
+                        ApplyPath _ [] _ _ ->
                             location
 
-                        ApplyPath (l :: left) up right ->
-                            ExprLocation l <| ApplyPath left up (expr :: right)
+                        ApplyPath applyKind (l :: left) up right ->
+                            ExprLocation l <| ApplyPath applyKind left up (expr :: right)
 
                         LetExpr [] _ ->
                             location
@@ -459,11 +468,11 @@ goLeft =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath [] _ _ ->
+                        ApplyPatternPath _ [] _ _ ->
                             location
 
-                        ApplyPatternPath (l :: left) up right ->
-                            PatternLocation l <| ApplyPatternPath left up (pattern :: right)
+                        ApplyPatternPath applyKind (l :: left) up right ->
+                            PatternLocation l <| ApplyPatternPath applyKind left up (pattern :: right)
 
                         -- In theory we could go left onto the previous case/declaration for these two.
                         CasePattern _ _ ->
@@ -606,11 +615,11 @@ goRight =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath _ _ [] ->
+                        ApplyPatternPath _ _ _ [] ->
                             location
 
-                        ApplyPatternPath left up (r :: right) ->
-                            PatternLocation r <| ApplyPatternPath (pattern :: left) up right
+                        ApplyPatternPath applyKind left up (r :: right) ->
+                            PatternLocation r <| ApplyPatternPath applyKind (pattern :: left) up right
 
                         CasePattern up expr ->
                             ExprLocation expr <| BranchExprPath pattern up
@@ -639,11 +648,11 @@ goRight =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath _ _ [] ->
+                        ApplyPath _ _ _ [] ->
                             location
 
-                        ApplyPath left up (r :: right) ->
-                            ExprLocation r <| ApplyPath (expr :: left) up right
+                        ApplyPath applyKind left up (r :: right) ->
+                            ExprLocation r <| ApplyPath applyKind (expr :: left) up right
 
                         LetExpr _ _ ->
                             location
@@ -784,10 +793,10 @@ goUp =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath left up right ->
+                        ApplyPatternPath applyKind left up right ->
                             let
                                 newPattern =
-                                    ApplyPattern <| upList left pattern right
+                                    ApplyPattern applyKind <| upList left pattern right
                             in
                             PatternLocation newPattern up
 
@@ -847,12 +856,12 @@ goUp =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath left up right ->
+                        ApplyPath applyKind left up right ->
                             let
                                 args =
                                     upList left expr right
                             in
-                            ExprLocation (Apply args) up
+                            ExprLocation (Apply applyKind args) up
 
                         LetExpr declarations up ->
                             let
@@ -968,12 +977,12 @@ goDown =
                         NamePattern _ ->
                             location
 
-                        ApplyPattern [] ->
+                        ApplyPattern _ [] ->
                             location
 
-                        ApplyPattern (first :: rest) ->
+                        ApplyPattern applyKind (first :: rest) ->
                             PatternLocation first <|
-                                ApplyPatternPath [] up rest
+                                ApplyPatternPath applyKind [] up rest
 
                 DeclLocation declaration up ->
                     -- Note this is a break from convention we're going into the expression
@@ -992,11 +1001,11 @@ goDown =
                         Leaf _ ->
                             location
 
-                        Apply [] ->
+                        Apply _ [] ->
                             location
 
-                        Apply (first :: rest) ->
-                            ExprLocation first <| ApplyPath [] up rest
+                        Apply applyKind (first :: rest) ->
+                            ExprLocation first <| ApplyPath applyKind [] up rest
 
                         Let [] inExpr ->
                             -- This should not happen but I guess it's kind of possible if someone is deleting declarations
@@ -1085,9 +1094,9 @@ insertLeft =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath left up right ->
+                        ApplyPatternPath applyKind left up right ->
                             PatternLocation (NamePattern "L") <|
-                                ApplyPatternPath left up (pattern :: right)
+                                ApplyPatternPath applyKind left up (pattern :: right)
 
                         DeclPattern _ _ ->
                             location
@@ -1124,9 +1133,9 @@ insertLeft =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath left up right ->
+                        ApplyPath applyKind left up right ->
                             ExprLocation (Leaf "1") <|
-                                ApplyPath left up (expr :: right)
+                                ApplyPath applyKind left up (expr :: right)
 
                         LetExpr declarations up ->
                             let
@@ -1222,9 +1231,9 @@ insertRight =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath left up right ->
+                        ApplyPatternPath applyKind left up right ->
                             PatternLocation (NamePattern "R") <|
-                                ApplyPatternPath (pattern :: left) up right
+                                ApplyPatternPath applyKind (pattern :: left) up right
 
                         DeclPattern _ _ ->
                             location
@@ -1261,13 +1270,13 @@ insertRight =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath left up right ->
+                        ApplyPath applyKind left up right ->
                             let
                                 newExpr =
                                     Leaf "e"
                             in
                             ExprLocation newExpr <|
-                                ApplyPath (expr :: left) up right
+                                ApplyPath applyKind (expr :: left) up right
 
                         LetExpr _ _ ->
                             -- In theory we could interpret this as 'insert a new declaration at the bottom of the list of declarations'
@@ -1336,12 +1345,12 @@ moveLeft =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath [] _ _ ->
+                        ApplyPath applyKind [] _ _ ->
                             location
 
-                        ApplyPath (l :: left) up right ->
+                        ApplyPath applyKind (l :: left) up right ->
                             ExprLocation expr <|
-                                ApplyPath left up (l :: right)
+                                ApplyPath applyKind left up (l :: right)
 
                         LetExpr [] _ ->
                             location
@@ -1381,12 +1390,12 @@ moveLeft =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath [] _ _ ->
+                        ApplyPatternPath _ [] _ _ ->
                             location
 
-                        ApplyPatternPath (l :: left) up right ->
+                        ApplyPatternPath applyKind (l :: left) up right ->
                             PatternLocation pattern <|
-                                ApplyPatternPath left up (l :: right)
+                                ApplyPatternPath applyKind left up (l :: right)
 
                         CasePattern _ _ ->
                             location
@@ -1481,12 +1490,12 @@ moveRight =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath _ _ [] ->
+                        ApplyPatternPath _ _ _ [] ->
                             location
 
-                        ApplyPatternPath left up (r :: right) ->
+                        ApplyPatternPath applyKind left up (r :: right) ->
                             PatternLocation pattern <|
-                                ApplyPatternPath (r :: left) up right
+                                ApplyPatternPath applyKind (r :: left) up right
 
                         DeclPattern up expr ->
                             location
@@ -1516,11 +1525,11 @@ moveRight =
 
                 ExprLocation expr path ->
                     case path of
-                        ApplyPath _ _ [] ->
+                        ApplyPath _ _ _ [] ->
                             location
 
-                        ApplyPath left up (r :: right) ->
-                            ExprLocation expr <| ApplyPath (r :: left) up right
+                        ApplyPath applyKind left up (r :: right) ->
+                            ExprLocation expr <| ApplyPath applyKind (r :: left) up right
 
                         LetExpr _ _ ->
                             location
@@ -1739,16 +1748,18 @@ cutAction =
             case editorState.location of
                 ExprLocation expr path ->
                     let
+                        -- Only called from Applicative, since both ListApply and TupleApply can have
+                        -- single expressions or even an empty list of expressions.
                         buildPath left up right =
                             case List.isEmpty left && List.isEmpty right of
                                 True ->
                                     up
 
                                 False ->
-                                    ApplyPath left up right
+                                    ApplyPath Applicative left up right
                     in
                     case path of
-                        ApplyPath [] up [] ->
+                        ApplyPath Applicative [] up [] ->
                             -- This is an impossible state that we shouldn't get into, we could do some tricks
                             -- for example we could update the location to `ExprLocation expr up` and then recursively
                             -- call `updateState. That would introduce the possiblity of an infinite loop. We could
@@ -1757,14 +1768,46 @@ cutAction =
                             -- let's just fail in an obvious way so that hopefully the underlying bug gets fixed.
                             editorState
 
-                        ApplyPath (l :: left) up right ->
+                        ApplyPath Applicative (l :: left) up right ->
                             { clipBoard = Just editorState.location
                             , location = ExprLocation l <| buildPath left up right
                             }
 
-                        ApplyPath [] up (r :: right) ->
+                        ApplyPath Applicative [] up (r :: right) ->
                             { clipBoard = Just editorState.location
                             , location = ExprLocation r <| buildPath [] up right
+                            }
+
+                        -- The difference with list and tuple applies is that they can be just single expressions or even
+                        -- empty list of expressions.
+                        ApplyPath ListApply [] up [] ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation (Apply ListApply []) up
+                            }
+
+                        ApplyPath ListApply (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation l <| ApplyPath ListApply left up right
+                            }
+
+                        ApplyPath ListApply [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation r <| ApplyPath ListApply [] up right
+                            }
+
+                        ApplyPath TupleApply [] up [] ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation (Apply TupleApply []) up
+                            }
+
+                        ApplyPath TupleApply (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation l <| ApplyPath TupleApply left up right
+                            }
+
+                        ApplyPath TupleApply [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location = ExprLocation r <| ApplyPath TupleApply [] up right
                             }
 
                         LetExpr _ _ ->
@@ -1831,20 +1874,42 @@ cutAction =
 
                 PatternLocation pattern path ->
                     case path of
-                        ApplyPatternPath [] _ [] ->
+                        ApplyPatternPath Applicative [] _ [] ->
                             -- An impossible state that we shouldn't get into see ApplyPath above.
                             editorState
 
-                        ApplyPatternPath (l :: left) up right ->
+                        ApplyPatternPath Applicative [ left ] up [] ->
                             { clipBoard = Just editorState.location
-                            , location =
-                                PatternLocation l <| ApplyPatternPath left up right
+                            , location = PatternLocation left up
                             }
 
-                        ApplyPatternPath [] up (r :: right) ->
+                        ApplyPatternPath Applicative [] up [ right ] ->
+                            { clipBoard = Just editorState.location
+                            , location = PatternLocation right up
+                            }
+
+                        ApplyPatternPath ListApply [] up [] ->
                             { clipBoard = Just editorState.location
                             , location =
-                                PatternLocation r <| ApplyPatternPath [] up right
+                                PatternLocation (ApplyPattern ListApply []) up
+                            }
+
+                        ApplyPatternPath TupleApply [] up [] ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                PatternLocation (ApplyPattern TupleApply []) up
+                            }
+
+                        ApplyPatternPath applyKind (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                PatternLocation l <| ApplyPatternPath applyKind left up right
+                            }
+
+                        ApplyPatternPath applyKind [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                PatternLocation r <| ApplyPatternPath applyKind [] up right
                             }
 
                         CasePattern _ _ ->
@@ -2158,7 +2223,7 @@ update msg model =
                                 Leaf _ ->
                                     focusLeafBox
 
-                                Apply _ ->
+                                Apply _ _ ->
                                     Cmd.none
 
                                 Let _ _ ->
@@ -2172,7 +2237,7 @@ update msg model =
                                 NamePattern _ ->
                                     focusLeafBox
 
-                                ApplyPattern _ ->
+                                ApplyPattern _ _ ->
                                     Cmd.none
 
                         TypePatternLocation typePattern _ ->
@@ -2445,8 +2510,8 @@ viewExpr expr =
         Leaf s ->
             text s
 
-        Apply children ->
-            layoutApply <| List.map viewExpr children
+        Apply applyKind children ->
+            layoutApply applyKind <| List.map viewExpr children
 
         Let declarations inExpr ->
             layoutLet (viewDeclarationList declarations) (viewExpr inExpr)
@@ -2569,16 +2634,31 @@ viewPattern pattern =
         NamePattern s ->
             text s
 
-        ApplyPattern patterns ->
-            layoutApply <| List.map viewPattern patterns
+        ApplyPattern applyKind patterns ->
+            layoutApply applyKind <| List.map viewPattern patterns
 
 
-layoutApply : List (Element msg) -> Element msg
-layoutApply =
-    Element.row
-        [ Element.spacing 4
-        , Element.width Element.fill
-        ]
+layoutApply : ApplyKind -> List (Element msg) -> Element msg
+layoutApply applyKind elements =
+    case applyKind of
+        Applicative ->
+            Element.row
+                [ Element.spacing 4
+                , Element.width Element.fill
+                ]
+                elements
+
+        ListApply ->
+            commaSeparated
+                (viewPunctuation "[")
+                elements
+                (viewPunctuation "]")
+
+        TupleApply ->
+            commaSeparated
+                (viewPunctuation "(")
+                elements
+                (viewPunctuation ")")
 
 
 
@@ -2592,13 +2672,13 @@ layoutApply =
 viewExprPath : Element msg -> ExprPath -> Element msg
 viewExprPath viewed path =
     case path of
-        ApplyPath left up right ->
+        ApplyPath applyKind left up right ->
             let
                 children =
                     mapUpList viewExpr left viewed right
 
                 child =
-                    layoutApply children
+                    layoutApply applyKind children
             in
             viewExprPath child up
 
@@ -2669,13 +2749,13 @@ viewDeclPath viewed path =
 viewPatternPath : Element msg -> PatternPath -> Element msg
 viewPatternPath viewed path =
     case path of
-        ApplyPatternPath left up right ->
+        ApplyPatternPath applyKind left up right ->
             let
                 children =
                     mapUpList viewPattern left viewed right
 
                 child =
-                    layoutApply children
+                    layoutApply applyKind children
             in
             viewPatternPath child up
 
@@ -2832,21 +2912,49 @@ layoutExports emptyText exports =
                 ]
                 (text emptyText)
 
+        _ ->
+            let
+                viewedExports =
+                    commaSeparated
+                        (viewPunctuation "(")
+                        exports
+                        (viewPunctuation ")")
+            in
+            case List.length exports > 3 of
+                False ->
+                    Element.row
+                        []
+                        [ viewKeyword "exposing"
+                        , viewedExports
+                        ]
+
+                True ->
+                    Element.column
+                        [ indentElement ]
+                        [ viewKeyword "exposing"
+                        , viewedExports
+                        ]
+
+
+commaSeparated : Element msg -> List (Element msg) -> Element msg -> Element msg
+commaSeparated opening elements closing =
+    case elements of
+        [] ->
+            Element.row
+                [ Element.spacing 5 ]
+                [ opening, closing ]
+
         [ only ] ->
             Element.row
-                [ indentElement ]
-                [ viewKeyword "exposing"
-                , viewPunctuation "("
-                , only
-                , viewPunctuation ")"
-                ]
+                [ Element.spacing 5 ]
+                [ opening, only, closing ]
 
-        first :: others ->
+        first :: rest ->
             let
                 viewedFirst =
                     Element.row
                         [ Element.spacing 5 ]
-                        [ viewPunctuation "(", first ]
+                        [ opening, first ]
 
                 viewOther other =
                     Element.row
@@ -2854,14 +2962,21 @@ layoutExports emptyText exports =
                         [ viewPunctuation ",", other ]
 
                 viewedOthers =
-                    List.map viewOther others
+                    List.map viewOther rest
 
-                closing =
-                    viewPunctuation ")"
+                viewedAll =
+                    viewedFirst :: viewedOthers ++ [ closing ]
             in
-            Element.column
-                [ indentElement ]
-                (viewKeyword "exposing" :: viewedFirst :: viewedOthers ++ [ closing ])
+            case List.length elements > 3 of
+                False ->
+                    Element.row
+                        []
+                        viewedAll
+
+                True ->
+                    Element.column
+                        [ indentElement ]
+                        viewedAll
 
 
 viewExports : String -> List Export -> Element msg
