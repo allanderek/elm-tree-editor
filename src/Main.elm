@@ -183,12 +183,29 @@ type PatternPath
 
 type ModuleDeclaration
     = ModuleValueDeclaration ValueDeclaration
+    | ModuleTypeAlias TypeAlias
     | ModuleTypeDeclaration TypeDeclaration
+
+
+type alias TypeAlias =
+    { pattern : TypePattern
+    , typeExpr : TypeExpr
+    }
 
 
 type alias TypeDeclaration =
     { pattern : TypePattern
-    , typeExpr : TypeExpr
+    , constructors : List ConstructorDecl
+    }
+
+
+type alias ConstructorName =
+    String
+
+
+type alias ConstructorDecl =
+    { name : ConstructorName
+    , arguments : List TypeExpr
     }
 
 
@@ -197,7 +214,12 @@ type TypePattern
 
 
 type TypePatternPath
-    = ModuleDeclTypePattern ModuleDeclPath TypeExpr
+    = ModuleDeclTypePattern ModuleDeclPath TypeDeclBody
+
+
+type TypeDeclBody
+    = AliasBody TypeExpr
+    | CustomTypeBody (List ConstructorDecl)
 
 
 type TypeExpr
@@ -206,6 +228,15 @@ type TypeExpr
 
 type TypeExprPath
     = ModuleDeclType TypePattern ModuleDeclPath
+    | ConstructorDeclType ConstructorName (List TypeExpr) ConstructorDeclPath (List TypeExpr)
+
+
+type ConstructorNamePath
+    = ConstructorNamePath ConstructorDeclPath (List TypeExpr)
+
+
+type ConstructorDeclPath
+    = ConstructorDeclPath TypePattern (List ConstructorDecl) ModuleDeclPath (List ConstructorDecl)
 
 
 type alias Export =
@@ -244,6 +275,8 @@ type Location
     | PatternLocation Pattern PatternPath
     | TypeExprLocation TypeExpr TypeExprPath
     | TypePatternLocation TypePattern TypePatternPath
+    | ConstructorDeclLocation ConstructorDecl ConstructorDeclPath
+    | ConstructorNameLocation ConstructorName ConstructorNamePath
     | ModuleImportLocation Import ModuleImportPath
     | ExportLocation Export ExportPath
     | ModuleNameLocation ModuleName ModuleNamePath
@@ -274,8 +307,19 @@ initialLocation =
         moduleDecl =
             ModuleValueDeclaration { pattern = NamePattern "main", expr = expr }
 
+        typeAlias =
+            ModuleTypeAlias { pattern = NameTypePattern "Person", typeExpr = NameType "String" }
+
         typeDecl =
-            ModuleTypeDeclaration { pattern = NameTypePattern "Person", typeExpr = NameType "String" }
+            ModuleTypeDeclaration
+                { pattern = NameTypePattern "Msg"
+                , constructors =
+                    [ { name = "Increment", arguments = [] }
+                    , { name = "Decrement", arguments = [] }
+                    , { name = "Received", arguments = [ NameType "Int" ] }
+                    , { name = "Go", arguments = [ NameType "Int", NameType "String" ] }
+                    ]
+                }
 
         moduleTerm =
             { name = "Main"
@@ -291,7 +335,7 @@ initialLocation =
                 , { name = "Html.Events", asName = Just "Attributes", exports = [ { name = "onClick", exportConstructors = False } ] }
                 , { name = "Maybe", asName = Nothing, exports = [ { name = "Maybe", exportConstructors = True } ] }
                 ]
-            , declarations = [ typeDecl, moduleDecl ]
+            , declarations = [ typeAlias, typeDecl, moduleDecl ]
             }
     in
     ModuleLocation moduleTerm
@@ -426,6 +470,19 @@ goLeft =
                                         [] ->
                                             ModuleNameLocation moduleName <| ModuleNamePath [] [] (mDecl :: right)
 
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern [] up right ->
+                            TypePatternLocation typePattern <|
+                                ModuleDeclTypePattern up (CustomTypeBody (conDecl :: right))
+
+                        ConstructorDeclPath typePattern (l :: left) up right ->
+                            ConstructorDeclLocation l <|
+                                ConstructorDeclPath typePattern left up (conDecl :: right)
+
+                ConstructorNameLocation _ _ ->
+                    location
+
                 ExprLocation expr path ->
                     case path of
                         ApplyPath _ [] _ _ ->
@@ -498,7 +555,15 @@ goLeft =
                     case path of
                         ModuleDeclType tPattern mDeclPath ->
                             TypePatternLocation tPattern <|
-                                ModuleDeclTypePattern mDeclPath typeExpr
+                                ModuleDeclTypePattern mDeclPath (AliasBody typeExpr)
+
+                        ConstructorDeclType conName [] up right ->
+                            ConstructorNameLocation conName <|
+                                ConstructorNamePath up right
+
+                        ConstructorDeclType cName (l :: left) up right ->
+                            TypeExprLocation l <|
+                                ConstructorDeclType cName left up (typeExpr :: right)
 
                 TypePatternLocation _ path ->
                     case path of
@@ -613,15 +678,47 @@ goRight =
                         ModuleDecl moduleName exports imports left (r :: right) ->
                             ModuleDeclLocation r <| ModuleDecl moduleName exports imports (mDecl :: left) right
 
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern left up [] ->
+                            location
+
+                        ConstructorDeclPath typePattern left up (r :: right) ->
+                            ConstructorDeclLocation r <|
+                                ConstructorDeclPath typePattern (conDecl :: left) up right
+
+                ConstructorNameLocation cName path ->
+                    case path of
+                        ConstructorNamePath up [] ->
+                            location
+
+                        ConstructorNamePath up (r :: right) ->
+                            TypeExprLocation r <|
+                                ConstructorDeclType cName [] up right
+
                 TypeExprLocation typeExpr path ->
                     case path of
                         ModuleDeclType tPattern mDeclPath ->
                             location
 
+                        ConstructorDeclType cName left up [] ->
+                            location
+
+                        ConstructorDeclType cName left up (r :: right) ->
+                            TypeExprLocation r <|
+                                ConstructorDeclType cName (typeExpr :: left) up right
+
                 TypePatternLocation tPattern path ->
                     case path of
-                        ModuleDeclTypePattern up typeExpr ->
+                        ModuleDeclTypePattern up (AliasBody typeExpr) ->
                             TypeExprLocation typeExpr <| ModuleDeclType tPattern up
+
+                        ModuleDeclTypePattern up (CustomTypeBody []) ->
+                            location
+
+                        ModuleDeclTypePattern up (CustomTypeBody (l :: rest)) ->
+                            ConstructorDeclLocation l <|
+                                ConstructorDeclPath tPattern [] up rest
 
                 PatternLocation pattern path ->
                     case path of
@@ -790,21 +887,60 @@ goUp =
                             in
                             ModuleLocation moduleTerm
 
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern left up right ->
+                            let
+                                declaration =
+                                    ModuleTypeDeclaration
+                                        { pattern = typePattern
+                                        , constructors = upList left conDecl right
+                                        }
+                            in
+                            ModuleDeclLocation declaration up
+
+                ConstructorNameLocation cName path ->
+                    case path of
+                        ConstructorNamePath up args ->
+                            let
+                                declaration =
+                                    { name = cName
+                                    , arguments = args
+                                    }
+                            in
+                            ConstructorDeclLocation declaration up
+
                 TypeExprLocation typeExpr path ->
                     case path of
                         ModuleDeclType tPattern up ->
                             let
                                 declaration =
-                                    ModuleTypeDeclaration { pattern = tPattern, typeExpr = typeExpr }
+                                    ModuleTypeAlias { pattern = tPattern, typeExpr = typeExpr }
                             in
                             ModuleDeclLocation declaration up
 
+                        ConstructorDeclType conName left up right ->
+                            let
+                                conDecl =
+                                    { name = conName
+                                    , arguments = upList left typeExpr right
+                                    }
+                            in
+                            ConstructorDeclLocation conDecl up
+
                 TypePatternLocation tPattern path ->
                     case path of
-                        ModuleDeclTypePattern up typeExpr ->
+                        ModuleDeclTypePattern up (AliasBody typeExpr) ->
                             let
                                 declaration =
-                                    ModuleTypeDeclaration { pattern = tPattern, typeExpr = typeExpr }
+                                    ModuleTypeAlias { pattern = tPattern, typeExpr = typeExpr }
+                            in
+                            ModuleDeclLocation declaration up
+
+                        ModuleDeclTypePattern up (CustomTypeBody constructors) ->
+                            let
+                                declaration =
+                                    ModuleTypeDeclaration { pattern = tPattern, constructors = constructors }
                             in
                             ModuleDeclLocation declaration up
 
@@ -981,9 +1117,20 @@ goDown =
                             PatternLocation declaration.pattern <|
                                 ModuleDeclPattern up declaration.expr
 
+                        ModuleTypeAlias declaration ->
+                            TypePatternLocation declaration.pattern <|
+                                ModuleDeclTypePattern up (AliasBody declaration.typeExpr)
+
                         ModuleTypeDeclaration declaration ->
                             TypePatternLocation declaration.pattern <|
-                                ModuleDeclTypePattern up declaration.typeExpr
+                                ModuleDeclTypePattern up (CustomTypeBody declaration.constructors)
+
+                ConstructorDeclLocation conDecl path ->
+                    ConstructorNameLocation conDecl.name <|
+                        ConstructorNamePath path conDecl.arguments
+
+                ConstructorNameLocation _ _ ->
+                    location
 
                 TypePatternLocation tPattern path ->
                     case tPattern of
@@ -1114,6 +1261,21 @@ insertLeft =
                             in
                             ModuleDeclLocation newMDecl <|
                                 ModuleDecl moduleName exports imports left (mDecl :: right)
+
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern left up right ->
+                            let
+                                newDecl =
+                                    { name = "L"
+                                    , arguments = []
+                                    }
+                            in
+                            ConstructorDeclLocation newDecl <|
+                                ConstructorDeclPath typePattern left up (conDecl :: right)
+
+                ConstructorNameLocation _ _ ->
+                    location
 
                 TypePatternLocation tPattern path ->
                     location
@@ -1258,6 +1420,22 @@ insertRight =
                             ModuleDeclLocation newMDecl <|
                                 ModuleDecl moduleName exports imports (mDecl :: left) right
 
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern left up right ->
+                            let
+                                newDecl =
+                                    { name = "R"
+                                    , arguments = []
+                                    }
+                            in
+                            ConstructorDeclLocation newDecl <|
+                                ConstructorDeclPath typePattern (conDecl :: left) up right
+
+                ConstructorNameLocation _ _ ->
+                    -- Arguably we could add an argument here, there is currently no way to do so.
+                    location
+
                 TypePatternLocation tPattern path ->
                     location
 
@@ -1384,6 +1562,18 @@ moveLeft =
                 ModuleNameLocation _ _ ->
                     location
 
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern [] up right ->
+                            location
+
+                        ConstructorDeclPath typePattern (l :: left) up right ->
+                            ConstructorDeclLocation conDecl <|
+                                ConstructorDeclPath typePattern left up (l :: right)
+
+                ConstructorNameLocation _ _ ->
+                    location
+
                 ExprLocation expr path ->
                     case path of
                         ApplyPath applyKind [] _ _ ->
@@ -1458,6 +1648,13 @@ moveLeft =
                         ModuleDeclType tPattern mDeclPath ->
                             location
 
+                        ConstructorDeclType cName [] up right ->
+                            location
+
+                        ConstructorDeclType cName (l :: left) up right ->
+                            TypeExprLocation typeExpr <|
+                                ConstructorDeclType cName left up (l :: right)
+
                 TypePatternLocation _ path ->
                     case path of
                         ModuleDeclTypePattern _ _ ->
@@ -1525,10 +1722,29 @@ moveRight =
                             ModuleDeclLocation moduleDecl <|
                                 ModuleDecl moduleName exports imports (r :: left) right
 
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern left up [] ->
+                            location
+
+                        ConstructorDeclPath typePattern left up (r :: right) ->
+                            ConstructorDeclLocation conDecl <|
+                                ConstructorDeclPath typePattern (r :: left) up right
+
+                ConstructorNameLocation _ _ ->
+                    location
+
                 TypeExprLocation typeExpr path ->
                     case path of
                         ModuleDeclType tPattern mDeclPath ->
                             location
+
+                        ConstructorDeclType cName left up [] ->
+                            location
+
+                        ConstructorDeclType cName left up (r :: right) ->
+                            TypeExprLocation typeExpr <|
+                                ConstructorDeclType cName (r :: left) up right
 
                 TypePatternLocation tPattern path ->
                     case path of
@@ -1651,6 +1867,12 @@ promoteExpression promote =
                 CaseLocation _ _ ->
                     location
 
+                ConstructorNameLocation _ _ ->
+                    location
+
+                ConstructorDeclLocation _ _ ->
+                    location
+
                 ExprLocation expr path ->
                     case ( promote, expr, path ) of
                         -- TODO: In all of these you're putting the new location on the newly created promoted
@@ -1716,7 +1938,7 @@ insertTypeDecl =
                 ModuleLocation moduleTerm ->
                     let
                         newTypeDecl =
-                            ModuleTypeDeclaration { pattern = NameTypePattern "A", typeExpr = NameType "String" }
+                            ModuleTypeAlias { pattern = NameTypePattern "A", typeExpr = NameType "String" }
                     in
                     ModuleDeclLocation newTypeDecl <|
                         ModuleDecl moduleTerm.name moduleTerm.exports moduleTerm.imports [] moduleTerm.declarations
@@ -1726,7 +1948,7 @@ insertTypeDecl =
                         ModuleDecl moduleName exports imports left right ->
                             let
                                 newTypeDecl =
-                                    ModuleTypeDeclaration { pattern = NameTypePattern "A", typeExpr = NameType "String" }
+                                    ModuleTypeAlias { pattern = NameTypePattern "A", typeExpr = NameType "String" }
                             in
                             ModuleDeclLocation newTypeDecl <|
                                 ModuleDecl moduleName exports imports left (currentDecl :: right)
@@ -1737,6 +1959,12 @@ insertTypeDecl =
                 -- dialog. For example, I really think we should have 'add import' and particularly when on a module declaration
                 -- we should have either "add to export list", or "remove from export list", though not quite sure what to do about
                 -- constructors in that scenario?
+                ConstructorDeclLocation _ _ ->
+                    location
+
+                ConstructorNameLocation _ _ ->
+                    location
+
                 ModuleImportLocation _ _ ->
                     location
 
@@ -1793,6 +2021,12 @@ toggleExportConstructors =
                             { export | exportConstructors = not export.exportConstructors }
                     in
                     ExportLocation newExport path
+
+                ConstructorNameLocation _ _ ->
+                    location
+
+                ConstructorDeclLocation _ _ ->
+                    location
 
                 ExprLocation _ _ ->
                     location
@@ -2023,10 +2257,49 @@ cutAction =
                         ModuleDeclType _ _ ->
                             editorState
 
+                        ConstructorDeclType cName [] up [] ->
+                            editorState
+
+                        ConstructorDeclType cName [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                TypeExprLocation r <|
+                                    ConstructorDeclType cName [] up right
+                            }
+
+                        ConstructorDeclType cName (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                TypeExprLocation l <|
+                                    ConstructorDeclType cName left up right
+                            }
+
                 TypePatternLocation typePattern path ->
                     case path of
                         ModuleDeclTypePattern _ _ ->
                             editorState
+
+                ConstructorNameLocation _ _ ->
+                    editorState
+
+                ConstructorDeclLocation conDecl path ->
+                    case path of
+                        ConstructorDeclPath typePattern [] up [] ->
+                            editorState
+
+                        ConstructorDeclPath typePattern [] up (r :: right) ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                ConstructorDeclLocation r <|
+                                    ConstructorDeclPath typePattern [] up right
+                            }
+
+                        ConstructorDeclPath typePattern (l :: left) up right ->
+                            { clipBoard = Just editorState.location
+                            , location =
+                                ConstructorDeclLocation l <|
+                                    ConstructorDeclPath typePattern left up right
+                            }
 
                 ModuleDeclLocation moduleDecl path ->
                     case path of
@@ -2229,6 +2502,16 @@ pasteAction =
                                 | location = ModuleNameLocation name path
                             }
 
+                        ( ConstructorNameLocation _ path, ConstructorNameLocation name _ ) ->
+                            { editorState
+                                | location = ConstructorNameLocation name path
+                            }
+
+                        ( ConstructorDeclLocation _ path, ConstructorDeclLocation decl _ ) ->
+                            { editorState
+                                | location = ConstructorDeclLocation decl path
+                            }
+
                         -- I'm just spelling all of these out so that I get a compiler warning to update the above
                         -- (and below) whenever we add a location kind.
                         ( ExprLocation _ _, _ ) ->
@@ -2262,6 +2545,12 @@ pasteAction =
                             editorState
 
                         ( ModuleLocation _, _ ) ->
+                            editorState
+
+                        ( ConstructorDeclLocation _ _, _ ) ->
+                            editorState
+
+                        ( ConstructorNameLocation _ _, _ ) ->
                             editorState
     in
     { updateState = updateState
@@ -2359,6 +2648,12 @@ update msg model =
                         ModuleNameLocation _ _ ->
                             focusLeafBox
 
+                        ConstructorNameLocation _ _ ->
+                            focusLeafBox
+
+                        ConstructorDeclLocation _ _ ->
+                            Cmd.none
+
                         ModuleDeclLocation _ _ ->
                             Cmd.none
 
@@ -2410,6 +2705,13 @@ update msg model =
                         ExportLocation export path ->
                             updateLocation <|
                                 ExportLocation { export | name = content } path
+
+                        ConstructorNameLocation _ path ->
+                            updateLocation <|
+                                ConstructorNameLocation content path
+
+                        ConstructorDeclLocation _ _ ->
+                            model
 
                         ModuleImportLocation _ _ ->
                             model
@@ -2931,19 +3233,65 @@ viewTypeExpr typeExpr =
             text s
 
 
-layoutTypeDeclaration : Element msg -> Element msg -> Element msg
-layoutTypeDeclaration viewedTypePattern viewedTypeExpr =
+layoutTypeAlias : Element msg -> Element msg -> Element msg
+layoutTypeAlias viewedTypePattern viewedTypeExpr =
     Element.column
         []
         [ Element.row
             [ Element.spacing 5 ]
             [ viewKeyword "type"
+            , viewKeyword "alias"
             , viewedTypePattern
             , viewPunctuation "="
             ]
-        , Element.el
-            [ indentElement ]
-            viewedTypeExpr
+        , Element.row
+            []
+            [ indentation
+            , viewedTypeExpr
+            ]
+        ]
+
+
+layoutTypeDecl : Element msg -> List (Element msg) -> Element msg
+layoutTypeDecl typePattern constructors =
+    let
+        viewedConstructors =
+            case constructors of
+                [] ->
+                    []
+
+                first :: rest ->
+                    let
+                        viewedFirst =
+                            Element.row
+                                [ Element.spacing 5 ]
+                                [ viewPunctuation "="
+                                , first
+                                ]
+
+                        viewRest c =
+                            Element.row
+                                [ Element.spacing 5 ]
+                                [ viewPunctuation "|"
+                                , c
+                                ]
+                    in
+                    viewedFirst :: List.map viewRest rest
+    in
+    Element.column
+        []
+        [ Element.row
+            [ Element.spacing 5 ]
+            [ viewKeyword "type"
+            , typePattern
+            ]
+        , Element.row
+            []
+            [ indentation
+            , Element.column
+                [ Element.spacing 5 ]
+                viewedConstructors
+            ]
         ]
 
 
@@ -2953,24 +3301,78 @@ viewTypeExprPath viewed path =
         ModuleDeclType tPattern up ->
             let
                 newViewed =
-                    layoutTypeDeclaration
+                    layoutTypeAlias
                         (viewTypePattern tPattern)
                         viewed
             in
             viewModuleDeclPath newViewed up
 
+        ConstructorDeclType cName left up right ->
+            let
+                child =
+                    layoutConstructorDecl
+                        (text cName)
+                        (mapUpList viewTypeExpr left viewed right)
+            in
+            viewConstructorDeclPath child up
+
+
+viewConstructorDeclPath : Element msg -> ConstructorDeclPath -> Element msg
+viewConstructorDeclPath viewed path =
+    case path of
+        ConstructorDeclPath typePattern left up right ->
+            let
+                child =
+                    layoutTypeDecl
+                        (viewTypePattern typePattern)
+                        (mapUpList viewConstructorDecl left viewed right)
+            in
+            viewModuleDeclPath child up
+
+
+viewConstructorNamePath : Element msg -> ConstructorNamePath -> Element msg
+viewConstructorNamePath viewed path =
+    case path of
+        ConstructorNamePath up arguments ->
+            let
+                child =
+                    layoutConstructorDecl viewed <|
+                        List.map viewTypeExpr arguments
+            in
+            viewConstructorDeclPath child up
+
+
+layoutConstructorDecl : Element msg -> List (Element msg) -> Element msg
+layoutConstructorDecl name arguments =
+    Element.row
+        [ Element.spacing 5 ]
+        (name :: arguments)
+
+
+viewConstructorDecl : ConstructorDecl -> Element msg
+viewConstructorDecl conDecl =
+    layoutConstructorDecl (text conDecl.name) <| List.map viewTypeExpr conDecl.arguments
+
 
 viewTypePatternPath : Element msg -> TypePatternPath -> Element msg
 viewTypePatternPath viewed path =
     case path of
-        ModuleDeclTypePattern up tExpr ->
+        ModuleDeclTypePattern up (AliasBody tExpr) ->
             let
                 newViewed =
-                    layoutTypeDeclaration
+                    layoutTypeAlias
                         viewed
                         (viewTypeExpr tExpr)
             in
             viewModuleDeclPath newViewed up
+
+        ModuleDeclTypePattern up (CustomTypeBody constructors) ->
+            let
+                child =
+                    layoutTypeDecl viewed <|
+                        List.map viewConstructorDecl constructors
+            in
+            viewModuleDeclPath child up
 
 
 viewModuleDeclaration : ModuleDeclaration -> Element msg
@@ -2979,10 +3381,15 @@ viewModuleDeclaration mDecl =
         ModuleValueDeclaration declaration ->
             viewDeclaration declaration
 
-        ModuleTypeDeclaration declaration ->
-            layoutTypeDeclaration
+        ModuleTypeAlias declaration ->
+            layoutTypeAlias
                 (viewTypePattern declaration.pattern)
                 (viewTypeExpr declaration.typeExpr)
+
+        ModuleTypeDeclaration declaration ->
+            layoutTypeDecl
+                (viewTypePattern declaration.pattern)
+                (List.map viewConstructorDecl declaration.constructors)
 
 
 viewModuleDeclPath : Element msg -> ModuleDeclPath -> Element msg
@@ -3060,15 +3467,23 @@ layoutExports emptyText exports =
                 False ->
                     Element.row
                         []
-                        [ viewKeyword "exposing"
-                        , viewedExports
+                        [ indentation
+                        , Element.row
+                            []
+                            [ viewKeyword "exposing"
+                            , viewedExports
+                            ]
                         ]
 
                 True ->
-                    Element.column
-                        [ indentElement ]
-                        [ viewKeyword "exposing"
-                        , viewedExports
+                    Element.row
+                        []
+                        [ indentation
+                        , Element.column
+                            [ indentElement ]
+                            [ viewKeyword "exposing"
+                            , viewedExports
+                            ]
                         ]
 
 
@@ -3285,6 +3700,12 @@ viewClipboard editorState =
         Just (ModuleLocation moduleTerm) ->
             viewModule moduleTerm
 
+        Just (ConstructorNameLocation name _) ->
+            text name
+
+        Just (ConstructorDeclLocation declaration _) ->
+            viewConstructorDecl declaration
+
 
 viewLocation : Location -> Element Msg
 viewLocation location =
@@ -3367,6 +3788,20 @@ viewLocation location =
                     viewHighlighted <| viewModuleDeclaration mDecl
             in
             viewModuleDeclPath viewed path
+
+        ConstructorNameLocation name path ->
+            let
+                viewed =
+                    viewFocusedLeaf name
+            in
+            viewConstructorNamePath viewed path
+
+        ConstructorDeclLocation decl path ->
+            let
+                viewed =
+                    viewHighlighted <| viewConstructorDecl decl
+            in
+            viewConstructorDeclPath viewed path
 
         TypeExprLocation tExpr path ->
             let
