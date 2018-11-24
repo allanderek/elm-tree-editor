@@ -1612,6 +1612,8 @@ type PromoteExpression
     | PromoteCase
     | PromoteList
     | PromoteTuple
+    | PromoteApply
+    | PromoteLambda
 
 
 promoteExpression : PromoteExpression -> Action
@@ -1651,6 +1653,11 @@ promoteExpression promote =
 
                 ExprLocation expr path ->
                     case ( promote, expr, path ) of
+                        -- TODO: In all of these you're putting the new location on the newly created promoted
+                        -- expression, but in theory you could keep it on the *current* expression that is likely
+                        -- where you want to be anyway, because when you promote an expression you're almost certain to
+                        -- want to edit it, so the way it currently is now you'll almost certainly follow the 'promote'
+                        -- action with a 'go-down'.
                         ( PromoteLet, Let _ _, _ ) ->
                             location
 
@@ -1686,6 +1693,12 @@ promoteExpression promote =
 
                         ( PromoteTuple, _, _ ) ->
                             ExprLocation (Apply TupleApply [ expr ]) path
+
+                        ( PromoteApply, _, _ ) ->
+                            ExprLocation (Apply Applicative [ expr, Leaf "a" ]) path
+
+                        ( PromoteLambda, _, _ ) ->
+                            ExprLocation (Lambda { pattern = NamePattern "_", expr = expr }) path
 
         updateState =
             updateStateLocation updateLocation
@@ -2563,6 +2576,8 @@ header editorState =
         , makeButton (promoteExpression PromoteCase) "Case"
         , makeButton (promoteExpression PromoteList) "List"
         , makeButton (promoteExpression PromoteTuple) "Tuple"
+        , makeButton (promoteExpression PromoteApply) "Apply"
+        , makeButton (promoteExpression PromoteLambda) "Lambda"
         , makeButton cutAction "Cut"
         , makeButton copyAction "Copy"
         , makeButton pasteAction "Paste"
