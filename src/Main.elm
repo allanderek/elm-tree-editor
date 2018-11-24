@@ -3311,7 +3311,7 @@ viewTypeExprPath viewed path =
             let
                 child =
                     layoutConstructorDecl
-                        (text cName)
+                        (viewConstructorName cName)
                         (mapUpList viewTypeExpr left viewed right)
             in
             viewConstructorDeclPath child up
@@ -3351,7 +3351,19 @@ layoutConstructorDecl name arguments =
 
 viewConstructorDecl : ConstructorDecl -> Element msg
 viewConstructorDecl conDecl =
-    layoutConstructorDecl (text conDecl.name) <| List.map viewTypeExpr conDecl.arguments
+    layoutConstructorDecl
+        (viewConstructorName conDecl.name)
+        (List.map viewTypeExpr conDecl.arguments)
+
+
+viewConstructorName : String -> Element msg
+viewConstructorName name =
+    el
+        [ Font.color themeColor4
+        , Font.bold
+        , Element.padding 3
+        ]
+        (text name)
 
 
 viewTypePatternPath : Element msg -> TypePatternPath -> Element msg
