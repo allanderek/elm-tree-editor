@@ -1,1 +1,1 @@
-./node_modules/.bin/elm-live -p 3000 -s index.html -- src/Main.elm --output static/main.js $@
+./node_modules/.bin/elm-live -p 6001 -s index.html -- src/Main.elm --output static/main.js $@
