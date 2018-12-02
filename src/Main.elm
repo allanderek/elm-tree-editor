@@ -338,7 +338,76 @@ goLeft =
 
 goRight : Action
 goRight =
-    goLeft
+    let
+        updateLocation location =
+            let
+                branchRight branchPath current =
+                    case branchPath.right of
+                        [] ->
+                            location
+
+                        (Singleton r) :: right ->
+                            { current = r
+                            , path =
+                                SingleChildPath
+                                    { branchPath
+                                        | left = current :: branchPath.left
+                                        , right = right
+                                    }
+                            }
+
+                        (OptionalChild r) :: right ->
+                            { current = r
+                            , path =
+                                OptionalChildPath
+                                    { branchPath
+                                        | left = current :: branchPath.left
+                                        , right = right
+                                    }
+                            }
+
+                        (ListChild listChildren) :: right ->
+                            case listChildren of
+                                [] ->
+                                    location
+
+                                first :: others ->
+                                    { current = first
+                                    , path =
+                                        ListChildPath
+                                            []
+                                            { branchPath
+                                                | left = current :: branchPath.left
+                                                , right = right
+                                            }
+                                            others
+                                    }
+            in
+            case location.path of
+                Top ->
+                    location
+
+                SingleChildPath branchPath ->
+                    branchRight branchPath <| Singleton location.current
+
+                OptionalChildPath branchPath ->
+                    branchRight branchPath <| OptionalChild location.current
+
+                ListChildPath left branchPath [] ->
+                    branchRight branchPath <| ListChild (List.reverse (location.current :: left))
+
+                ListChildPath left branchPath (r :: right) ->
+                    { current = r
+                    , path =
+                        ListChildPath (location.current :: left) branchPath right
+                    }
+
+        updateState =
+            updateStateLocation updateLocation
+    in
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
+    }
 
 
 goUp : Action
