@@ -412,12 +412,86 @@ goRight =
 
 goUp : Action
 goUp =
-    goLeft
+    let
+        updateLocation location =
+            let
+                branchPathUp branchPath current =
+                    { path = branchPath.up
+                    , current =
+                        Branch branchPath.kind <|
+                            upList branchPath.left current branchPath.right
+                    }
+            in
+            case location.path of
+                Top ->
+                    location
+
+                SingleChildPath branchPath ->
+                    branchPathUp branchPath <| Singleton location.current
+
+                OptionalChildPath branchPath ->
+                    branchPathUp branchPath <| OptionalChild location.current
+
+                ListChildPath left branchPath right ->
+                    let
+                        current =
+                            ListChild <| upList left location.current right
+                    in
+                    branchPathUp branchPath current
+
+        updateState =
+            updateStateLocation updateLocation
+    in
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
+    }
 
 
 goDown : Action
 goDown =
-    goLeft
+    let
+        updateLocation location =
+            case location.current of
+                Leaf _ ->
+                    location
+
+                Branch kind [] ->
+                    location
+
+                Branch kind (firstChild :: others) ->
+                    let
+                        upBranchPath =
+                            { kind = kind
+                            , left = []
+                            , up = location.path
+                            , right = others
+                            }
+                    in
+                    case firstChild of
+                        Singleton child ->
+                            { current = child
+                            , path = SingleChildPath upBranchPath
+                            }
+
+                        OptionalChild child ->
+                            { current = child
+                            , path = OptionalChildPath upBranchPath
+                            }
+
+                        ListChild [] ->
+                            location
+
+                        ListChild (first :: rest) ->
+                            { current = first
+                            , path = ListChildPath [] upBranchPath rest
+                            }
+
+        updateState =
+            updateStateLocation updateLocation
+    in
+    { updateState = updateState
+    , isAvailable = defaultIsAvailable updateState
+    }
 
 
 
@@ -960,7 +1034,11 @@ viewLocation location =
 
 viewBranchPath : List (Element msg) -> BranchPath -> Element msg
 viewBranchPath viewed branchPath =
-    layoutTerm branchPath.kind <| mapUpList viewChild branchPath.left viewed branchPath.right
+    let
+        newViewed =
+            layoutTerm branchPath.kind <| mapUpList viewChild branchPath.left viewed branchPath.right
+    in
+    viewPath newViewed branchPath.up
 
 
 viewPath : Element msg -> Path -> Element msg
