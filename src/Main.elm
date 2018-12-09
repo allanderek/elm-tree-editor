@@ -4,6 +4,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import Dict exposing (Dict)
 import Element exposing (Element, el, text)
 import Element.Background as Background
 import Element.Border as Border
@@ -37,36 +38,9 @@ subscriptions =
 keySubscription : Sub Msg
 keySubscription =
     let
-        keyDecoder : Decode.Decoder Msg
         keyDecoder =
-            let
-                toMsg k =
-                    case keyToEditorAction k of
-                        Nothing ->
-                            NoOp
-
-                        Just e ->
-                            EditorAction e
-            in
-            Decode.map toMsg <| Decode.field "key" Decode.string
-
-        keyToEditorAction : String -> Maybe Action
-        keyToEditorAction string =
-            case string of
-                "ArrowLeft" ->
-                    Just goLeft
-
-                "ArrowRight" ->
-                    Just goRight
-
-                "ArrowUp" ->
-                    Just goUp
-
-                "ArrowDown" ->
-                    Just goDown
-
-                _ ->
-                    Nothing
+            Decode.map KeyPressed <|
+                Decode.field "key" Decode.string
     in
     Browser.Events.onKeyPress keyDecoder
 
@@ -78,65 +52,141 @@ type alias ProgramFlags =
 type alias Model =
     { key : Nav.Key
     , url : Url.Url
-    , editorState : EditorState
+    , elmBuffers : List (Buffer ElmNode)
+    , jsonBuffers : List (Buffer JsonNode)
+    , currentBuffer : CurrentBuffer
     }
 
 
-type alias EditorState =
-    { location : Location
-    , clipBoard : Maybe Fragment
-    }
+type CurrentBuffer
+    = ElmBuffer (Buffer ElmNode)
+    | JsonBuffer (Buffer JsonNode)
 
 
-type alias Fragment =
-    Term
-
-
-type alias Location =
-    { current : Term
-    , path : Path
-    }
-
-
-type NodeKind
+type ElmNode
     = Let
     | Apply
     | Decl
 
 
-type Child kind
-    = Singleton kind
-    | ListChild (List kind)
-    | OptionalChild kind
+type JsonNode
+    = ListNode
+    | ObjectNode
+    | FieldNode
 
 
-type Term
-    = Leaf String
-    | Branch NodeKind (List (Child Term))
+type alias Buffer node =
+    { state : EditorState node
 
-
-type Path
-    = Top
-    | SingleChildPath BranchPath
-    | OptionalChildPath BranchPath
-    | ListChildPath (List Term) BranchPath (List Term)
-
-
-type alias BranchPath =
-    { kind : NodeKind
-    , left : List (Child Term)
-    , up : Path
-    , right : List (Child Term)
+    -- This means you just have a set list of actions and they each have an 'isAvailable' function.
+    -- Alternatively we could have a function from EditorState node -> List (Action node).
+    , actions : Dict ActionId (Action node)
+    , keys : Dict String ActionId
     }
+
+
+type alias EditorState node =
+    { location : Location node
+    , clipBoard : Maybe (Fragment node)
+    }
+
+
+type alias ActionId =
+    String
+
+
+type alias Action node =
+    { actionId : ActionId
+    , name : String
+    , updateState : EditorState node -> EditorState node
+    , isAvailable : EditorState node -> Bool
+    }
+
+
+
+-- The default function for checking whether an action is available or not is just to apply the
+-- given update location function and see if the location has changed. Now this obviously may result
+-- in a fair amount of unnecessary work for certain actions, in which case we can simply provide a more
+-- sophisticated `isAvailable` function.
+
+
+defaultIsAvailable : (EditorState node -> EditorState node) -> EditorState node -> Bool
+defaultIsAvailable updateState state =
+    state /= updateState state
+
+
+updateStateLocation : (Location node -> Location node) -> EditorState node -> EditorState node
+updateStateLocation f state =
+    { state | location = f state.location }
+
+
+type alias Fragment node =
+    Term node
+
+
+type alias Location node =
+    { current : Term node
+    , path : Path node
+    }
+
+
+type Child node
+    = Singleton (Term node)
+    | ListChild (List (Term node))
+    | OptionalChild (Term node)
+
+
+type Term node
+    = Leaf String
+    | Branch node (List (Child node))
+
+
+type Path node
+    = Top
+    | SingleChildPath (BranchPath node)
+    | OptionalChildPath (BranchPath node)
+    | ListChildPath (List (Term node)) (BranchPath node) (List (Term node))
+
+
+type alias BranchPath node =
+    { kind : node
+    , left : List (Child node)
+    , up : Path node
+    , right : List (Child node)
+    }
+
+
+defaultKeys : Dict String ActionId
+defaultKeys =
+    Dict.fromList
+        [ ( "ArrowLeft", "goLeft" )
+        , ( "ArrowRight", "goRight" )
+        , ( "ArrowUp", "goUp" )
+        , ( "ArrowDown", "goDown" )
+        ]
+
+
+defaultActions : Dict String (Action node)
+defaultActions =
+    let
+        addAction action =
+            Dict.insert action.actionId action
+
+        actions =
+            [ genericGoLeft
+            , genericGoRight
+            , genericGoUp
+            , genericGoDown
+            ]
+    in
+    List.foldl addAction Dict.empty actions
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init () url key =
     let
-        initialModel =
-            { key = key
-            , url = url
-            , editorState =
+        elmBuffer =
+            { state =
                 { location =
                     { current = Branch Apply [ ListChild [ Leaf "f", Leaf "a" ] ]
                     , path =
@@ -149,6 +199,36 @@ init () url key =
                     }
                 , clipBoard = Nothing
                 }
+            , actions = defaultActions
+            , keys = defaultKeys
+            }
+
+        jsonBuffer =
+            { state =
+                { location =
+                    { current = Branch FieldNode [ Singleton <| Leaf "f", Singleton <| Leaf "\"a\"" ]
+                    , path =
+                        ListChildPath
+                            [ Branch FieldNode [ Singleton <| Leaf "left", Singleton <| Leaf "1" ] ]
+                            { up = Top
+                            , kind = ObjectNode
+                            , left = []
+                            , right = []
+                            }
+                            [ Branch FieldNode [ Singleton <| Leaf "right", Singleton <| Leaf "2" ] ]
+                    }
+                , clipBoard = Nothing
+                }
+            , actions = defaultActions
+            , keys = defaultKeys
+            }
+
+        initialModel =
+            { key = key
+            , url = url
+            , elmBuffers = [ elmBuffer ]
+            , jsonBuffers = [ jsonBuffer ]
+            , currentBuffer = JsonBuffer jsonBuffer
             }
     in
     withCommands initialModel []
@@ -168,31 +248,9 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
     | NoOp
-    | EditorAction Action
+    | KeyPressed String
+    | EditorAction ActionId
     | LeafInput String
-
-
-type alias Action =
-    { updateState : EditorState -> EditorState
-    , isAvailable : EditorState -> Bool
-    }
-
-
-
--- The default function for checking whether an action is available or not is just to apply the
--- given update location function and see if the location has changed. Now this obviously may result
--- in a fair amount of unnecessary work for certain actions, in which case we can simply provide a more
--- sophisticated `isAvailable` function.
-
-
-defaultIsAvailable : (EditorState -> EditorState) -> EditorState -> Bool
-defaultIsAvailable updateState state =
-    state /= updateState state
-
-
-updateStateLocation : (Location -> Location) -> EditorState -> EditorState
-updateStateLocation f state =
-    { state | location = f state.location }
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -216,45 +274,113 @@ update msg model =
         NoOp ->
             withCommands model []
 
-        EditorAction editorAction ->
+        KeyPressed keyCode ->
+            case model.currentBuffer of
+                ElmBuffer buffer ->
+                    let
+                        ( newBuffer, command ) =
+                            applyKey keyCode buffer
+                    in
+                    withCommands { model | currentBuffer = ElmBuffer newBuffer } [ command ]
+
+                JsonBuffer buffer ->
+                    let
+                        ( newBuffer, command ) =
+                            applyKey keyCode buffer
+                    in
+                    withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
+
+        EditorAction actionId ->
+            case model.currentBuffer of
+                ElmBuffer buffer ->
+                    let
+                        ( newBuffer, command ) =
+                            applyAction actionId buffer
+                    in
+                    withCommands { model | currentBuffer = ElmBuffer newBuffer } [ command ]
+
+                JsonBuffer buffer ->
+                    let
+                        ( newBuffer, command ) =
+                            applyAction actionId buffer
+                    in
+                    withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
+
+        LeafInput content ->
             let
-                newModel =
-                    { model | editorState = editorAction.updateState model.editorState }
+                updateBuffer : Buffer node -> Buffer node
+                updateBuffer buffer =
+                    case buffer.state.location.current of
+                        Leaf _ ->
+                            let
+                                state =
+                                    buffer.state
+
+                                location =
+                                    buffer.state.location
+
+                                newLocation =
+                                    { location | current = Leaf content }
+
+                                newState =
+                                    { state | location = newLocation }
+                            in
+                            { buffer | state = newState }
+
+                        Branch _ _ ->
+                            buffer
+            in
+            case model.currentBuffer of
+                ElmBuffer buffer ->
+                    let
+                        newBuffer =
+                            updateBuffer buffer
+                    in
+                    withCommands { model | currentBuffer = ElmBuffer newBuffer } []
+
+                JsonBuffer buffer ->
+                    let
+                        newBuffer =
+                            updateBuffer buffer
+                    in
+                    withCommands { model | currentBuffer = JsonBuffer newBuffer } []
+
+
+applyKey : String -> Buffer node -> ( Buffer node, Cmd Msg )
+applyKey keyCode buffer =
+    case Dict.get keyCode buffer.keys of
+        Nothing ->
+            withCommands buffer []
+
+        Just actionId ->
+            applyAction actionId buffer
+
+
+applyAction : ActionId -> Buffer node -> ( Buffer node, Cmd Msg )
+applyAction actionId buffer =
+    case Dict.get actionId buffer.actions of
+        Nothing ->
+            withCommands buffer []
+
+        Just action ->
+            let
+                newState =
+                    action.updateState buffer.state
+
+                newBuffer =
+                    { buffer
+                        | state = newState
+                    }
 
                 command =
-                    case newModel.editorState.location.current of
+                    case newState.location.current of
                         Leaf _ ->
                             focusLeafBox
 
                         Branch _ _ ->
                             Cmd.none
             in
-            withCommands newModel [ command ]
-
-        LeafInput content ->
-            let
-                newModel =
-                    case model.editorState.location.current of
-                        Leaf _ ->
-                            let
-                                editorState =
-                                    model.editorState
-
-                                location =
-                                    editorState.location
-
-                                newLocation =
-                                    { location | current = Leaf content }
-
-                                newState =
-                                    { editorState | location = newLocation }
-                            in
-                            { model | editorState = newState }
-
-                        Branch _ _ ->
-                            model
-            in
-            withCommands newModel []
+            withCommands newBuffer [ command ]
 
 
 withCommands : model -> List (Cmd msg) -> ( model, Cmd msg )
@@ -262,8 +388,8 @@ withCommands model commands =
     ( model, Cmd.batch commands )
 
 
-goLeft : Action
-goLeft =
+genericGoLeft : Action node
+genericGoLeft =
     let
         updateLocation location =
             let
@@ -331,13 +457,15 @@ goLeft =
         updateState =
             updateStateLocation updateLocation
     in
-    { updateState = updateState
+    { actionId = "goLeft"
+    , name = "Left"
+    , updateState = updateState
     , isAvailable = defaultIsAvailable updateState
     }
 
 
-goRight : Action
-goRight =
+genericGoRight : Action node
+genericGoRight =
     let
         updateLocation location =
             let
@@ -405,13 +533,15 @@ goRight =
         updateState =
             updateStateLocation updateLocation
     in
-    { updateState = updateState
+    { actionId = "goRight"
+    , name = "Right"
+    , updateState = updateState
     , isAvailable = defaultIsAvailable updateState
     }
 
 
-goUp : Action
-goUp =
+genericGoUp : Action node
+genericGoUp =
     let
         updateLocation location =
             let
@@ -442,13 +572,15 @@ goUp =
         updateState =
             updateStateLocation updateLocation
     in
-    { updateState = updateState
+    { actionId = "goUp"
+    , name = "Up"
+    , updateState = updateState
     , isAvailable = defaultIsAvailable updateState
     }
 
 
-goDown : Action
-goDown =
+genericGoDown : Action node
+genericGoDown =
     let
         updateLocation location =
             case location.current of
@@ -489,7 +621,9 @@ goDown =
         updateState =
             updateStateLocation updateLocation
     in
-    { updateState = updateState
+    { actionId = "goDown"
+    , name = "Down"
+    , updateState = updateState
     , isAvailable = defaultIsAvailable updateState
     }
 
@@ -513,16 +647,32 @@ mapUpList fun left hole right =
 
 view : Model -> Browser.Document Msg
 view model =
+    case model.currentBuffer of
+        ElmBuffer _ ->
+            let
+                body =
+                    text "I haven't figured out how to draw elm code yet"
+            in
+            { title = "Json Tree Editing"
+            , body = [ Element.layout [] body ]
+            }
+
+        JsonBuffer buffer ->
+            viewJsonBuffer buffer
+
+
+viewJsonBuffer : Buffer JsonNode -> Browser.Document Msg
+viewJsonBuffer buffer =
     let
         controls =
             Element.column
                 []
-                [ header model.editorState
-                , viewClipboard model.editorState
+                [ header buffer
+                , viewClipboard buffer
                 ]
 
         mainContent =
-            viewLocation model.editorState.location
+            viewLocation buffer.state.location
 
         body =
             Element.row
@@ -536,7 +686,7 @@ view model =
                 , Element.el [ Element.width <| Element.fillPortion 7 ] mainContent
                 ]
     in
-    { title = "Tree source editing with Elm"
+    { title = "Json Tree Editing"
     , body = [ Element.layout [] body ]
     }
 
@@ -578,8 +728,8 @@ themeColor5 =
     Element.rgb255 207 222 230
 
 
-header : EditorState -> Element Msg
-header editorState =
+header : Buffer node -> Element Msg
+header buffer =
     let
         button title mMsg =
             let
@@ -604,22 +754,20 @@ header editorState =
                 , label = text title
                 }
 
-        makeButton editorAction title =
-            case editorAction.isAvailable editorState of
+        makeButton action =
+            case action.isAvailable buffer.state of
                 True ->
-                    button title <| Just (EditorAction editorAction)
+                    button action.name <| Just (EditorAction action.actionId)
 
                 False ->
-                    button title Nothing
+                    button action.name Nothing
     in
     Element.wrappedRow
         [ Element.height Element.fill
         , Element.width Element.fill
         , Element.spaceEvenly
         ]
-        [ makeButton goLeft "Left"
-        , makeButton goUp "Up"
-        ]
+        (List.map makeButton <| Dict.values buffer.actions)
 
 
 indentElement : Element.Attribute msg
@@ -658,326 +806,123 @@ indentation =
         (text "")
 
 
-layoutLambda : Element msg -> Element msg -> Element msg
-layoutLambda pattern expr =
-    Element.row
-        [ Element.spacing 5 ]
-        [ Element.row
-            []
-            [ viewPunctuation "\\"
-            , pattern
-            ]
-        , viewPunctuation "->"
-        , expr
-        ]
+idAttribute : String -> Element.Attribute msg
+idAttribute s =
+    Element.htmlAttribute <| Attributes.id s
 
 
-layoutCaseBranch : Element msg -> Element msg -> Element msg
-layoutCaseBranch pattern expr =
-    Element.column
-        [ Element.spacing 5 ]
-        [ Element.row
-            [ Element.spacing 5 ]
-            [ pattern
-            , viewPunctuation "->"
-            ]
-        , Element.row
-            []
-            [ indentation, expr ]
-        ]
+classAttribute : String -> Element.Attribute msg
+classAttribute s =
+    Element.htmlAttribute <| Attributes.class s
 
 
-layoutCase : Element msg -> List (Element msg) -> Element msg
-layoutCase matchExpr branches =
-    Element.column
-        [ Element.spacing 5 ]
-        [ Element.row
-            []
-            [ viewKeyword "case"
-            , matchExpr
-            , viewKeyword "of"
-            ]
-        , Element.row
-            []
-            [ indentation
-            , Element.column
-                [ Element.spacing 5 ]
-                branches
-            ]
-        ]
+viewClipboard : Buffer JsonNode -> Element msg
+viewClipboard buffer =
+    case buffer.state.clipBoard of
+        Nothing ->
+            Element.none
+
+        Just term ->
+            viewTerm term
 
 
-layoutLet : List (Element msg) -> Element msg -> Element msg
-layoutLet declarations expr =
-    Element.column
-        [ classAttribute "let" ]
-        [ viewKeyword "let"
-        , Element.column
-            [ Element.spacing 10
-            , indentElement
-            ]
-            declarations
-        , viewKeyword "in"
-        , el
-            [ classAttribute "let-payload" ]
-            expr
-        ]
+viewTerm : Term JsonNode -> Element msg
+viewTerm term =
+    case term of
+        Leaf s ->
+            text s
+
+        Branch ListNode children ->
+            layoutList <| viewChildren children
+
+        Branch ObjectNode children ->
+            layoutObject <| viewChildren children
+
+        Branch FieldNode children ->
+            layoutField <| viewChildren children
 
 
-layoutDeclaration : Element msg -> Element msg -> Element msg
-layoutDeclaration declPattern declExpr =
-    Element.column
-        []
-        [ Element.row
-            [ Element.spacing 8 ]
-            [ el
-                [ Element.width Element.fill
-                , Font.color themeColor4
-                ]
-                declPattern
-            , viewPunctuation "="
-            ]
-        , el
-            [ indentElement ]
-            declExpr
-        ]
+viewChild : Child JsonNode -> Element msg
+viewChild child =
+    case child of
+        Singleton term ->
+            viewTerm term
+
+        OptionalChild term ->
+            viewTerm term
+
+        ListChild terms ->
+            Element.column
+                []
+                (List.map viewTerm terms)
 
 
-layoutApply : List (Element msg) -> Element msg
-layoutApply elements =
-    Element.row
-        [ Element.spacing 4
-        , Element.width Element.fill
-        ]
-        elements
+viewChildren : List (Child JsonNode) -> List (Element msg)
+viewChildren =
+    List.map viewChild
 
 
-layoutTypeAlias : Element msg -> Element msg -> Element msg
-layoutTypeAlias viewedTypePattern viewedTypeExpr =
-    Element.column
-        []
-        [ Element.row
-            [ Element.spacing 5 ]
-            [ viewKeyword "type"
-            , viewKeyword "alias"
-            , viewedTypePattern
-            , viewPunctuation "="
-            ]
-        , Element.row
-            []
-            [ indentation
-            , viewedTypeExpr
-            ]
-        ]
-
-
-layoutTypeDecl : Element msg -> List (Element msg) -> Element msg
-layoutTypeDecl typePattern constructors =
+layoutList : List (Element msg) -> Element msg
+layoutList elements =
     let
-        viewedConstructors =
-            case constructors of
-                [] ->
-                    []
-
-                first :: rest ->
-                    let
-                        viewedFirst =
-                            Element.row
-                                [ Element.spacing 5 ]
-                                [ viewPunctuation "="
-                                , first
-                                ]
-
-                        viewRest c =
-                            Element.row
-                                [ Element.spacing 5 ]
-                                [ viewPunctuation "|"
-                                , c
-                                ]
-                    in
-                    viewedFirst :: List.map viewRest rest
-    in
-    Element.column
-        []
-        [ Element.row
-            [ Element.spacing 5 ]
-            [ viewKeyword "type"
-            , typePattern
-            ]
-        , Element.row
-            []
-            [ indentation
-            , Element.column
-                [ Element.spacing 5 ]
-                viewedConstructors
-            ]
-        ]
-
-
-layoutConstructorDecl : Element msg -> List (Element msg) -> Element msg
-layoutConstructorDecl name arguments =
-    Element.row
-        [ Element.spacing 5 ]
-        (name :: arguments)
-
-
-layoutExport : Element msg -> Bool -> Element msg
-layoutExport name exportConstructors =
-    case exportConstructors of
-        False ->
-            name
-
-        True ->
+        layoutListElement punctuation element =
             Element.row
-                [ Element.spacing 2 ]
-                [ name
-                , viewPunctuation "(..)"
+                [ usualSpacing ]
+                [ viewPunctuation punctuation
+                , element
                 ]
-
-
-layoutExports : String -> List (Element msg) -> Element msg
-layoutExports emptyText exports =
-    case exports of
-        [] ->
-            Element.el
-                [ indentElement
-                , Font.light
-                ]
-                (text emptyText)
-
-        _ ->
-            let
-                viewedExports =
-                    commaSeparated
-                        (viewPunctuation "(")
-                        exports
-                        (viewPunctuation ")")
-            in
-            case List.length exports > 3 of
-                False ->
-                    Element.row
-                        []
-                        [ indentation
-                        , Element.row
-                            []
-                            [ viewKeyword "exposing"
-                            , viewedExports
-                            ]
-                        ]
-
-                True ->
-                    Element.row
-                        []
-                        [ indentation
-                        , Element.column
-                            [ indentElement ]
-                            [ viewKeyword "exposing"
-                            , viewedExports
-                            ]
-                        ]
-
-
-commaSeparated : Element msg -> List (Element msg) -> Element msg -> Element msg
-commaSeparated opening elements closing =
+    in
     case elements of
         [] ->
-            Element.row
-                [ Element.spacing 5 ]
-                [ opening, closing ]
-
-        [ only ] ->
-            Element.row
-                [ Element.spacing 5 ]
-                [ opening, only, closing ]
+            viewPunctuation "[]"
 
         first :: rest ->
-            let
-                viewedFirst =
-                    Element.row
-                        [ Element.spacing 5 ]
-                        [ opening, first ]
-
-                viewOther other =
-                    Element.row
-                        [ Element.spacing 5 ]
-                        [ viewPunctuation ",", other ]
-
-                viewedOthers =
-                    List.map viewOther rest
-
-                viewedAll =
-                    viewedFirst :: viewedOthers ++ [ closing ]
-            in
-            case List.length elements > 3 of
-                False ->
-                    Element.row
-                        []
-                        viewedAll
-
-                True ->
-                    Element.column
-                        [ indentElement ]
-                        viewedAll
+            -- Actually now that I think about it, this is very 'elmy' layout of list,
+            -- for json maybe we don't actually want this.
+            Element.column
+                [ usualSpacing ]
+                [ layoutListElement "[" first
+                , Element.column
+                    [ usualSpacing ]
+                    (List.map (layoutListElement ",") rest)
+                , viewPunctuation "]"
+                ]
 
 
-layoutImport : Element msg -> Maybe (Element msg) -> Element msg -> Element msg
-layoutImport importName mAsName exports =
+layoutObject : List (Element msg) -> Element msg
+layoutObject elements =
     let
-        asTerm =
-            case mAsName of
-                Nothing ->
-                    Element.none
-
-                Just name ->
-                    Element.row
-                        [ Element.spacing 5 ]
-                        [ viewKeyword "as"
-                        , name
-                        ]
+        -- TODO: Okay so the last one shouldn't have a comma after it.
+        layoutObjectField element =
+            Element.row
+                []
+                [ element, viewPunctuation "," ]
     in
     Element.column
-        [ Element.spacing 5 ]
-        [ Element.row
-            [ Element.spacing 5 ]
-            [ viewKeyword "import"
-            , importName
-            , asTerm
-            ]
-        , exports
+        [ usualSpacing ]
+        [ viewPunctuation "{"
+        , Element.column
+            [ usualSpacing ]
+            (List.map layoutObjectField elements)
+        , viewPunctuation "}"
         ]
 
 
-layoutImports : List (Element msg) -> Element msg
-layoutImports =
-    Element.column
-        []
+layoutField : List (Element msg) -> Element msg
+layoutField elements =
+    case elements of
+        [] ->
+            Element.none
 
+        first :: rest ->
+            Element.row
+                [ usualSpacing ]
+                [ first
+                , viewPunctuation ":"
 
-layoutModuleHeading : Element msg -> Element msg -> Element msg -> Element msg
-layoutModuleHeading nameRow exports imports =
-    Element.column
-        []
-        [ nameRow
-        , exports
-        , imports
-        ]
-
-
-layoutNameRow : Element msg -> Element msg
-layoutNameRow viewed =
-    Element.row
-        [ Element.spacing 5 ]
-        [ viewKeyword "module"
-        , viewed
-        , viewKeyword "exposing"
-        ]
-
-
-layoutModule : Element msg -> List (Element msg) -> Element msg
-layoutModule heading mDecls =
-    Element.column
-        [ Element.spacing 10 ]
-        (heading :: mDecls)
+                -- Obviously rest should be exactly one.
+                , Element.row [] rest
+                ]
 
 
 viewHighlighted : Element Msg -> Element Msg
@@ -1008,20 +953,10 @@ viewFocusedLeaf contents =
         }
 
 
-viewClipboard : EditorState -> Element msg
-viewClipboard editorState =
-    case editorState.clipBoard of
-        Nothing ->
-            text "Clipboard empty"
-
-        Just term ->
-            viewTerm term
-
-
-viewLocation : Location -> Element Msg
+viewLocation : Location JsonNode -> Element Msg
 viewLocation location =
     let
-        viewed =
+        hole =
             case location.current of
                 Leaf s ->
                     viewFocusedLeaf s
@@ -1029,99 +964,52 @@ viewLocation location =
                 Branch _ _ ->
                     viewHighlighted <| viewTerm location.current
     in
-    viewPath viewed location.path
+    viewPath hole location.path
 
 
-viewBranchPath : List (Element msg) -> BranchPath -> Element msg
-viewBranchPath viewed branchPath =
-    let
-        newViewed =
-            layoutTerm branchPath.kind <| mapUpList viewChild branchPath.left viewed branchPath.right
-    in
-    viewPath newViewed branchPath.up
-
-
-viewPath : Element msg -> Path -> Element msg
+viewPath : Element msg -> Path JsonNode -> Element msg
 viewPath viewed path =
     case path of
         Top ->
             viewed
 
-        SingleChildPath branchPath ->
-            viewBranchPath [ viewed ] branchPath
+        SingleChildPath bpath ->
+            viewBranchPath viewed bpath
 
-        OptionalChildPath branchPath ->
-            viewBranchPath [ viewed ] branchPath
+        OptionalChildPath bpath ->
+            viewBranchPath viewed bpath
 
-        ListChildPath left branchPath right ->
-            let
-                subViewed =
-                    mapUpList viewTerm left viewed right
-            in
-            viewBranchPath subViewed branchPath
-
-
-viewChild : Child Term -> List (Element msg)
-viewChild child =
-    case child of
-        Singleton term ->
-            [ viewTerm term ]
-
-        OptionalChild term ->
-            [ viewTerm term ]
-
-        ListChild children ->
-            List.map viewTerm children
+        ListChildPath left bpath right ->
+            -- TODO: This is not right, we've no idea how to separate these.
+            -- I'll come back to this when I understand more what we're doing.
+            -- I think we probably need some kind of typing to say something about
+            -- a list child path, ie. what kind of node we're under.
+            Element.column
+                -- The unusual spacing is so that I see where this is happening and understand what I have to do.
+                [ Element.spacing 20 ]
+                (mapUpList viewTerm left (viewBranchPath viewed bpath) right)
 
 
-viewTerm : Term -> Element msg
-viewTerm term =
-    case term of
-        Leaf s ->
-            text s
+viewBranchPath : Element msg -> BranchPath JsonNode -> Element msg
+viewBranchPath viewed bpath =
+    let
+        children =
+            mapUpList viewChild bpath.left viewed bpath.right
 
-        Branch kind childTerms ->
-            layoutTerm kind <| List.map viewChild childTerms
+        hole =
+            case bpath.kind of
+                ListNode ->
+                    layoutList children
 
+                ObjectNode ->
+                    layoutObject children
 
-viewErrored : String -> Element msg
-viewErrored s =
-    text ("Error: " ++ s)
-
-
-layoutTerm : NodeKind -> List (List (Element msg)) -> Element msg
-layoutTerm kind childBranches =
-    case kind of
-        Let ->
-            case childBranches of
-                [ declarations, [ inExpr ] ] ->
-                    layoutLet declarations inExpr
-
-                _ ->
-                    viewErrored "invalid let"
-
-        Apply ->
-            case childBranches of
-                [ expressions ] ->
-                    layoutApply expressions
-
-                _ ->
-                    viewErrored "invalid apply"
-
-        Decl ->
-            case childBranches of
-                [ [ pattern ], [ expr ] ] ->
-                    layoutDeclaration pattern expr
-
-                _ ->
-                    viewErrored "invalid declaration"
+                FieldNode ->
+                    layoutField children
+    in
+    viewPath hole bpath.up
 
 
-idAttribute : String -> Element.Attribute msg
-idAttribute s =
-    Element.htmlAttribute <| Attributes.id s
-
-
-classAttribute : String -> Element.Attribute msg
-classAttribute s =
-    Element.htmlAttribute <| Attributes.class s
+usualSpacing : Element.Attribute msg
+usualSpacing =
+    Element.spacing 5
