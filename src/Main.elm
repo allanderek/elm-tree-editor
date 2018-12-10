@@ -206,16 +206,16 @@ init () url key =
         jsonBuffer =
             { state =
                 { location =
-                    { current = Branch FieldNode [ Singleton <| Leaf "f", Singleton <| Leaf "\"a\"" ]
-                    , path =
-                        ListChildPath
-                            [ Branch FieldNode [ Singleton <| Leaf "left", Singleton <| Leaf "1" ] ]
-                            { up = Top
-                            , kind = ObjectNode
-                            , left = []
-                            , right = []
-                            }
-                            [ Branch FieldNode [ Singleton <| Leaf "right", Singleton <| Leaf "2" ] ]
+                    { current =
+                        Branch
+                            ObjectNode
+                            [ ListChild
+                                [ Branch FieldNode [ Singleton <| Leaf "first", Singleton <| Leaf "1" ]
+                                , Branch FieldNode [ Singleton <| Leaf "second", Singleton <| Leaf "2" ]
+                                , Branch FieldNode [ Singleton <| Leaf "third", Singleton <| Leaf "3" ]
+                                ]
+                            ]
+                    , path = Top
                     }
                 , clipBoard = Nothing
                 }
@@ -223,6 +223,29 @@ init () url key =
             , keys = defaultKeys
             }
 
+        {- }
+           jsonBuffer =
+               { state =
+                   { location =
+                       { current = Branch FieldNode [ Singleton <| Leaf "f", Singleton <| Leaf "\"a\"" ]
+                       , path =
+                           ListChildPath
+                               []
+                               { up = Top
+                               , kind = ObjectNode
+                               , left =
+                                   [ Branch FieldNode [ Singleton <| Leaf "left", Singleton <| Leaf "1" ] ]
+                               , right =
+                                   [ Branch FieldNode [ Singleton <| Leaf "right", Singleton <| Leaf "2" ] ]
+                               }
+                               []
+                       }
+                   , clipBoard = Nothing
+                   }
+               , actions = defaultActions
+               , keys = defaultKeys
+               }
+        -}
         initialModel =
             { key = key
             , url = url
@@ -728,6 +751,11 @@ themeColor5 =
     Element.rgb255 207 222 230
 
 
+errorColor : Element.Color
+errorColor =
+    Element.rgb255 222 10 20
+
+
 header : Buffer node -> Element Msg
 header buffer =
     let
@@ -768,11 +796,6 @@ header buffer =
         , Element.spaceEvenly
         ]
         (List.map makeButton <| Dict.values buffer.actions)
-
-
-indentElement : Element.Attribute msg
-indentElement =
-    Element.paddingEach { left = 20, right = 0, top = 0, bottom = 0 }
 
 
 viewKeyword : String -> Element msg
@@ -835,8 +858,11 @@ viewTerm term =
         Branch ListNode children ->
             layoutList <| viewChildren children
 
+        Branch ObjectNode [ ListChild children ] ->
+            layoutObject <| List.map viewTerm children
+
         Branch ObjectNode children ->
-            layoutObject <| viewChildren children
+            viewErrored (layoutObject <| viewChildren children)
 
         Branch FieldNode children ->
             layoutField <| viewChildren children
@@ -891,21 +917,41 @@ layoutList elements =
 
 layoutObject : List (Element msg) -> Element msg
 layoutObject elements =
-    let
-        -- TODO: Okay so the last one shouldn't have a comma after it.
-        layoutObjectField element =
+    case elements of
+        [] ->
+            viewPunctuation "{}"
+
+        [ one ] ->
             Element.row
-                []
-                [ element, viewPunctuation "," ]
-    in
-    Element.column
-        [ usualSpacing ]
-        [ viewPunctuation "{"
-        , Element.column
-            [ usualSpacing ]
-            (List.map layoutObjectField elements)
-        , viewPunctuation "}"
-        ]
+                [ usualSpacing ]
+                [ viewPunctuation "{"
+                , one
+                , viewPunctuation "}"
+                ]
+
+        _ ->
+            -- We need to not output the comma at the end of the *last* field.
+            let
+                displayField f =
+                    Element.row
+                        []
+                        [ f, viewPunctuation "," ]
+
+                fields =
+                    List.map displayField elements
+            in
+            Element.column
+                [ usualSpacing ]
+                [ viewPunctuation "{"
+                , Element.row
+                    []
+                    [ indentation
+                    , Element.column
+                        [ usualSpacing ]
+                        fields
+                    ]
+                , viewPunctuation "}"
+                ]
 
 
 layoutField : List (Element msg) -> Element msg
@@ -925,12 +971,23 @@ layoutField elements =
                 ]
 
 
-viewHighlighted : Element Msg -> Element Msg
+viewHighlighted : Element msg -> Element msg
 viewHighlighted viewed =
     el
         [ Border.width 2
         , Border.rounded 5
         , Border.color themeColor5
+        , Element.paddingEach { right = 10, top = 0, bottom = 0, left = 0 }
+        ]
+        viewed
+
+
+viewErrored : Element msg -> Element msg
+viewErrored viewed =
+    el
+        [ Border.width 2
+        , Border.rounded 5
+        , Border.color errorColor
         , Element.paddingEach { right = 10, top = 0, bottom = 0, left = 0 }
         ]
         viewed
