@@ -1037,14 +1037,36 @@ viewPath viewed path =
             viewBranchPath viewed bpath
 
         ListChildPath left bpath right ->
-            -- TODO: This is not right, we've no idea how to separate these.
-            -- I'll come back to this when I understand more what we're doing.
-            -- I think we probably need some kind of typing to say something about
-            -- a list child path, ie. what kind of node we're under.
-            Element.column
-                -- The unusual spacing is so that I see where this is happening and understand what I have to do.
-                [ Element.spacing 20 ]
-                (mapUpList viewTerm left (viewBranchPath viewed bpath) right)
+            case bpath.kind of
+                ListNode ->
+                    -- TODO: This just assumes that bpath.right and bpath.left are empty.
+                    -- we need to check that and error if not.
+                    let
+                        elements =
+                            mapUpList viewTerm left viewed right
+
+                        hole =
+                            layoutList elements
+                    in
+                    viewPath hole bpath.up
+
+                ObjectNode ->
+                    -- TODO: This just assumes that bpath.right and bpath.left are empty.
+                    -- we need to check that and error if not.
+                    let
+                        elements =
+                            mapUpList viewTerm left viewed right
+
+                        hole =
+                            layoutObject elements
+                    in
+                    viewPath hole bpath.up
+
+                FieldNode ->
+                    -- This shouldn't happen a field node should not have a list child, it
+                    -- has just two singleton children.
+                    -- TODO: This is absolutely not right though we need to view the left and right.
+                    viewBranchPath (viewErrored viewed) bpath
 
 
 viewBranchPath : Element msg -> BranchPath JsonNode -> Element msg
