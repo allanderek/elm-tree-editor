@@ -5,9 +5,9 @@ module JsonMode exposing
     )
 
 import Browser
+import BufferMessage exposing (BufferMsg)
 import Element exposing (Element, text)
 import GenericActions
-import Message exposing (Msg)
 import Types
     exposing
         ( Buffer
@@ -36,7 +36,7 @@ newBuffer location =
     }
 
 
-view : Buffer Node -> Browser.Document Msg
+view : Buffer Node -> { title : String, body : Element BufferMsg }
 view buffer =
     let
         clipBoard =
@@ -44,12 +44,9 @@ view buffer =
 
         mainContent =
             viewLocation buffer.state.location
-
-        body =
-            ViewUtils.body buffer clipBoard mainContent
     in
     { title = "Json Tree Editing"
-    , body = [ Element.layout [] body ]
+    , body = ViewUtils.body buffer clipBoard mainContent
     }
 
 
@@ -185,7 +182,7 @@ layoutField elements =
                 ]
 
 
-viewLocation : Location Node -> Element Msg
+viewLocation : Location Node -> Element BufferMsg
 viewLocation location =
     let
         hole =

@@ -10,6 +10,7 @@ module ViewUtils exposing
     , themeColor4
     , themeColor5
     , usualSpacing
+    , viewButton
     , viewErrored
     , viewFocusedLeaf
     , viewHighlighted
@@ -17,6 +18,7 @@ module ViewUtils exposing
     , viewPunctuation
     )
 
+import BufferMessage exposing (BufferMsg(..))
 import Dict
 import Element exposing (Element, el, text)
 import Element.Background as Background
@@ -25,11 +27,10 @@ import Element.Events as Events
 import Element.Font as Font
 import Element.Input as Input
 import Html.Attributes
-import Message exposing (Msg(..))
 import Types
 
 
-body : Types.Buffer node -> Element Msg -> Element Msg -> Element Msg
+body : Types.Buffer node -> Element BufferMsg -> Element BufferMsg -> Element BufferMsg
 body buffer clipBoard mainContent =
     let
         controls =
@@ -51,39 +52,41 @@ body buffer clipBoard mainContent =
         ]
 
 
-header : Types.Buffer node -> Element Msg
+viewButton : String -> Maybe msg -> Element msg
+viewButton title mMsg =
+    let
+        opacity =
+            case mMsg == Nothing of
+                True ->
+                    0.4
+
+                False ->
+                    1.0
+    in
+    Input.button
+        [ Background.color themeColor2
+        , Border.color themeColor1
+        , Border.width 2
+        , Element.padding 5
+        , Border.rounded 5
+        , Element.alpha opacity
+        , Font.color themeColor1
+        ]
+        { onPress = mMsg
+        , label = text title
+        }
+
+
+header : Types.Buffer node -> Element BufferMsg
 header buffer =
     let
-        button title mMsg =
-            let
-                opacity =
-                    case mMsg == Nothing of
-                        True ->
-                            0.4
-
-                        False ->
-                            1.0
-            in
-            Input.button
-                [ Background.color themeColor2
-                , Border.color themeColor1
-                , Border.width 2
-                , Element.padding 5
-                , Border.rounded 5
-                , Element.alpha opacity
-                , Font.color themeColor1
-                ]
-                { onPress = mMsg
-                , label = text title
-                }
-
         makeButton action =
             case action.isAvailable buffer.state of
                 True ->
-                    button action.name <| Just (EditorAction action.actionId)
+                    viewButton action.name <| Just (EditorAction action.actionId)
 
                 False ->
-                    button action.name Nothing
+                    viewButton action.name Nothing
     in
     Element.wrappedRow
         [ Element.height Element.fill
@@ -151,7 +154,7 @@ viewErrored viewed =
         viewed
 
 
-viewFocusedLeaf : String -> Element Msg
+viewFocusedLeaf : String -> Element BufferMsg
 viewFocusedLeaf contents =
     Input.text
         [ classAttribute "leaf-input"

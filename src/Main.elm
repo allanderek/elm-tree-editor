@@ -4,6 +4,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import BufferMessage exposing (BufferMsg)
 import Dict exposing (Dict)
 import Element
 import ElmMode as Elm
@@ -11,7 +12,6 @@ import Html.Attributes as Attributes
 import Json.Decode as Decode
 import JsonMode as Json
 import List.Extra
-import Message exposing (Msg(..))
 import Task
 import Types
 import Url
@@ -61,6 +61,15 @@ type alias Model =
 type CurrentBuffer
     = ElmBuffer (Types.Buffer Elm.Node)
     | JsonBuffer (Types.Buffer Json.Node)
+
+
+type Msg
+    = LinkClicked Browser.UrlRequest
+    | UrlChanged Url.Url
+    | NoOp
+    | KeyPressed String
+    | SelectCurrentBuffer CurrentBuffer
+    | BufferMsg BufferMsg
 
 
 init : ProgramFlags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -145,26 +154,35 @@ update msg model =
                     in
                     withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
 
-        EditorAction actionId ->
+        SelectCurrentBuffer newCurrentBuffer ->
+            withCommands { model | currentBuffer = newCurrentBuffer } []
+
+        BufferMsg bufferMessage ->
             case model.currentBuffer of
                 ElmBuffer buffer ->
                     let
                         ( newBuffer, command ) =
-                            applyAction actionId buffer
+                            updateBuffer bufferMessage buffer
                     in
                     withCommands { model | currentBuffer = ElmBuffer newBuffer } [ command ]
 
                 JsonBuffer buffer ->
                     let
                         ( newBuffer, command ) =
-                            applyAction actionId buffer
+                            updateBuffer bufferMessage buffer
                     in
                     withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
 
-        LeafInput content ->
+
+updateBuffer : BufferMsg -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
+updateBuffer message buffer =
+    case message of
+        BufferMessage.EditorAction actionId ->
+            applyAction actionId buffer
+
+        BufferMessage.LeafInput content ->
             let
-                updateBuffer : Types.Buffer node -> Types.Buffer node
-                updateBuffer buffer =
+                newBuffer =
                     case buffer.state.location.current of
                         Types.Leaf _ ->
                             let
@@ -185,20 +203,7 @@ update msg model =
                         Types.Branch _ _ ->
                             buffer
             in
-            case model.currentBuffer of
-                ElmBuffer buffer ->
-                    let
-                        newBuffer =
-                            updateBuffer buffer
-                    in
-                    withCommands { model | currentBuffer = ElmBuffer newBuffer } []
-
-                JsonBuffer buffer ->
-                    let
-                        newBuffer =
-                            updateBuffer buffer
-                    in
-                    withCommands { model | currentBuffer = JsonBuffer newBuffer } []
+            withCommands newBuffer []
 
 
 applyKey : String -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
@@ -245,15 +250,53 @@ withCommands model commands =
 
 view : Model -> Browser.Document Msg
 view model =
-    case model.currentBuffer of
-        ElmBuffer _ ->
-            let
-                body =
-                    Element.text "I haven't figured out how to draw elm code yet"
-            in
-            { title = "Json Tree Editing"
-            , body = [ Element.layout [] body ]
-            }
+    let
+        document =
+            case model.currentBuffer of
+                ElmBuffer _ ->
+                    { title = "Elm Tree Editing"
+                    , body = Element.text "I haven't figured out how to draw elm code yet"
+                    }
 
-        JsonBuffer buffer ->
-            Json.view buffer
+                JsonBuffer buffer ->
+                    Json.view buffer
+
+        makeElmButton elmBuffer =
+            let
+                newCurrentBuffer =
+                    ElmBuffer elmBuffer
+            in
+            ViewUtils.viewButton "Elm" (Just <| SelectCurrentBuffer newCurrentBuffer)
+
+        elmBufferControls =
+            Element.row
+                []
+                (List.map makeElmButton model.elmBuffers)
+
+        makeJsonButton jsonBuffer =
+            let
+                newCurrentBuffer =
+                    JsonBuffer jsonBuffer
+            in
+            ViewUtils.viewButton "Json" (Just <| SelectCurrentBuffer newCurrentBuffer)
+
+        jsonBufferControls =
+            Element.row
+                []
+                (List.map makeJsonButton model.jsonBuffers)
+
+        bufferControls =
+            Element.row
+                []
+                [ elmBufferControls, jsonBufferControls ]
+
+        body =
+            Element.column
+                []
+                [ bufferControls
+                , Element.map BufferMsg document.body
+                ]
+    in
+    { title = document.title
+    , body = [ Element.layout [] body ]
+    }
