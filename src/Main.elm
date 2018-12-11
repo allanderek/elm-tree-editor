@@ -261,12 +261,20 @@ view model =
                 JsonBuffer buffer ->
                     Json.view buffer
 
-        makeElmButton elmBuffer =
+        makeBufferControl title newCurrentBuffer =
             let
-                newCurrentBuffer =
-                    ElmBuffer elmBuffer
+                msg =
+                    case model.currentBuffer == newCurrentBuffer of
+                        True ->
+                            Nothing
+
+                        False ->
+                            Just <| SelectCurrentBuffer newCurrentBuffer
             in
-            ViewUtils.viewButton "Elm" (Just <| SelectCurrentBuffer newCurrentBuffer)
+            ViewUtils.viewButton title msg
+
+        makeElmButton elmBuffer =
+            makeBufferControl "Elm" <| ElmBuffer elmBuffer
 
         elmBufferControls =
             Element.row
@@ -274,11 +282,7 @@ view model =
                 (List.map makeElmButton model.elmBuffers)
 
         makeJsonButton jsonBuffer =
-            let
-                newCurrentBuffer =
-                    JsonBuffer jsonBuffer
-            in
-            ViewUtils.viewButton "Json" (Just <| SelectCurrentBuffer newCurrentBuffer)
+            makeBufferControl "Json" <| JsonBuffer jsonBuffer
 
         jsonBufferControls =
             Element.row
