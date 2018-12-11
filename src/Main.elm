@@ -253,10 +253,8 @@ view model =
     let
         document =
             case model.currentBuffer of
-                ElmBuffer _ ->
-                    { title = "Elm Tree Editing"
-                    , body = Element.text "I haven't figured out how to draw elm code yet"
-                    }
+                ElmBuffer buffer ->
+                    Elm.view buffer
 
                 JsonBuffer buffer ->
                     Json.view buffer

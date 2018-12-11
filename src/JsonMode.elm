@@ -66,8 +66,11 @@ viewTerm term =
         Leaf s ->
             text s
 
+        Branch ListNode [ ListChild children ] ->
+            layoutList <| List.map viewTerm children
+
         Branch ListNode children ->
-            layoutList <| viewChildren children
+            ViewUtils.viewErrored (layoutList <| viewChildren children)
 
         Branch ObjectNode [ ListChild children ] ->
             layoutObject <| List.map viewTerm children
@@ -79,7 +82,7 @@ viewTerm term =
             layoutField <| viewChildren children
 
 
-viewChild : Child Node -> Element msg
+viewChild : Child (Term Node) -> Element msg
 viewChild child =
     case child of
         Singleton term ->
@@ -94,7 +97,7 @@ viewChild child =
                 (List.map viewTerm terms)
 
 
-viewChildren : List (Child Node) -> List (Element msg)
+viewChildren : List (Child (Term Node)) -> List (Element msg)
 viewChildren =
     List.map viewChild
 

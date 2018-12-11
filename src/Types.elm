@@ -10,6 +10,9 @@ module Types exposing
     , Path(..)
     , Term(..)
     , defaultIsAvailable
+    , extractFromChild
+    , extractFromChildren
+    , mapChild
     , mapUpList
     , upList
     , updateStateLocation
@@ -90,15 +93,19 @@ type alias Location node =
     }
 
 
-type Child node
-    = Singleton (Term node)
-    | ListChild (List (Term node))
-    | OptionalChild (Term node)
+
+-- Typically 'term' will be `Term node`
+
+
+type Child term
+    = Singleton term
+    | OptionalChild term
+    | ListChild (List term)
 
 
 type Term node
     = Leaf String
-    | Branch node (List (Child node))
+    | Branch node (List (Child (Term node)))
 
 
 type Path node
@@ -110,7 +117,38 @@ type Path node
 
 type alias BranchPath node =
     { kind : node
-    , left : List (Child node)
+    , left : List (Child (Term node))
     , up : Path node
-    , right : List (Child node)
+    , right : List (Child (Term node))
     }
+
+
+extractFromChild : Child a -> List a
+extractFromChild child =
+    case child of
+        Singleton a ->
+            [ a ]
+
+        OptionalChild a ->
+            [ a ]
+
+        ListChild someAs ->
+            someAs
+
+
+extractFromChildren : List (Child a) -> List a
+extractFromChildren children =
+    List.concat <| List.map extractFromChild children
+
+
+mapChild : (a -> b) -> Child a -> Child b
+mapChild f child =
+    case child of
+        Singleton a ->
+            Singleton <| f a
+
+        OptionalChild a ->
+            OptionalChild <| f a
+
+        ListChild someAs ->
+            ListChild <| List.map f someAs

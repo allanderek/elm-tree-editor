@@ -2,6 +2,7 @@ module ViewUtils exposing
     ( body
     , errorColor
     , header
+    , indentElement
     , indentation
     , leafBoxId
     , themeColor1
@@ -130,6 +131,11 @@ indentation =
         , Background.color themeColor2
         ]
         (text "")
+
+
+indentElement : Element msg -> Element msg
+indentElement block =
+    Element.row [] [ indentation, block ]
 
 
 viewHighlighted : Element msg -> Element msg
