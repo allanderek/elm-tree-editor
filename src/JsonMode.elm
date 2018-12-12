@@ -70,16 +70,19 @@ viewTerm term =
             layoutList <| List.map viewTerm children
 
         Branch ListNode children ->
-            ViewUtils.viewErrored (layoutList <| viewChildren children)
+            layoutListError <| viewChildren children
 
         Branch ObjectNode [ ListChild children ] ->
             layoutObject <| List.map viewTerm children
 
         Branch ObjectNode children ->
-            ViewUtils.viewErrored (layoutObject <| viewChildren children)
+            layoutObjectError <| viewChildren children
+
+        Branch FieldNode [ Singleton field, Singleton value ] ->
+            layoutField (viewTerm field) (viewTerm value)
 
         Branch FieldNode children ->
-            layoutField <| viewChildren children
+            layoutFieldError <| viewChildren children
 
 
 viewChild : Child (Term Node) -> Element msg
@@ -129,6 +132,11 @@ layoutList elements =
                 ]
 
 
+layoutListError : List (Element msg) -> Element msg
+layoutListError children =
+    ViewUtils.viewErrored <| layoutList children
+
+
 layoutObject : List (Element msg) -> Element msg
 layoutObject elements =
     case elements of
@@ -144,7 +152,7 @@ layoutObject elements =
                 ]
 
         _ ->
-            -- We need to not output the comma at the end of the *last* field.
+            -- TODO: We need to not output the comma at the end of the *last* field.
             let
                 displayField f =
                     Element.row
@@ -168,35 +176,48 @@ layoutObject elements =
                 ]
 
 
-layoutField : List (Element msg) -> Element msg
-layoutField elements =
-    case elements of
-        [] ->
-            Element.none
+layoutObjectError : List (Element msg) -> Element msg
+layoutObjectError children =
+    ViewUtils.viewErrored <| layoutObject children
 
-        first :: rest ->
-            Element.row
-                [ ViewUtils.usualSpacing ]
-                [ first
-                , ViewUtils.viewPunctuation ":"
 
-                -- Obviously rest should be exactly one.
-                , Element.row [] rest
-                ]
+layoutField : Element msg -> Element msg -> Element msg
+layoutField field value =
+    Element.row
+        [ ViewUtils.usualSpacing ]
+        [ field
+        , ViewUtils.viewPunctuation ":"
+        , value
+        ]
+
+
+layoutFieldError : List (Element msg) -> Element msg
+layoutFieldError elements =
+    let
+        fieldElement =
+            case elements of
+                [] ->
+                    layoutField Element.none Element.none
+
+                [ one ] ->
+                    layoutField one Element.none
+
+                [ field, value ] ->
+                    layoutField field value
+
+                field :: rest ->
+                    let
+                        value =
+                            Element.row [] rest
+                    in
+                    layoutField field value
+    in
+    ViewUtils.viewErrored fieldElement
 
 
 viewLocation : Location Node -> Element BufferMsg
-viewLocation location =
-    let
-        hole =
-            case location.current of
-                Leaf s ->
-                    ViewUtils.viewFocusedLeaf s
-
-                Branch _ _ ->
-                    ViewUtils.viewHighlighted <| viewTerm location.current
-    in
-    viewPath hole location.path
+viewLocation =
+    ViewUtils.viewLocation viewTerm viewPath
 
 
 viewPath : Element msg -> Path Node -> Element msg
@@ -206,59 +227,51 @@ viewPath viewed path =
             viewed
 
         SingleChildPath bpath ->
-            viewBranchPath viewed bpath
+            viewBranchPath (Singleton viewed) bpath
 
         OptionalChildPath bpath ->
-            viewBranchPath viewed bpath
+            viewBranchPath (OptionalChild viewed) bpath
 
         ListChildPath left bpath right ->
-            case bpath.kind of
-                ListNode ->
-                    -- TODO: This just assumes that bpath.right and bpath.left are empty.
-                    -- we need to check that and error if not.
-                    let
-                        elements =
-                            Types.mapUpList viewTerm left viewed right
-
-                        hole =
-                            layoutList elements
-                    in
-                    viewPath hole bpath.up
-
-                ObjectNode ->
-                    -- TODO: This just assumes that bpath.right and bpath.left are empty.
-                    -- we need to check that and error if not.
-                    let
-                        elements =
-                            Types.mapUpList viewTerm left viewed right
-
-                        hole =
-                            layoutObject elements
-                    in
-                    viewPath hole bpath.up
-
-                FieldNode ->
-                    -- This shouldn't happen a field node should not have a list child, it
-                    -- has just two singleton children.
-                    -- TODO: This is absolutely not right though we need to view the left and right.
-                    viewBranchPath (ViewUtils.viewErrored viewed) bpath
+            let
+                viewedList =
+                    Types.mapUpList viewTerm left viewed right
+            in
+            viewBranchPath (ListChild viewedList) bpath
 
 
-viewBranchPath : Element msg -> Types.BranchPath Node -> Element msg
-viewBranchPath viewed bpath =
+viewBranchPath : Types.Child (Element msg) -> Types.BranchPath Node -> Element msg
+viewBranchPath viewedChild bpath =
     let
         children =
-            Types.mapUpList viewChild bpath.left viewed bpath.right
+            Types.mapUpList (Types.mapChild viewTerm) bpath.left viewedChild bpath.right
 
         hole =
             case bpath.kind of
                 ListNode ->
-                    layoutList children
+                    case children of
+                        [ ListChild elements ] ->
+                            layoutList elements
+
+                        _ ->
+                            layoutListError <|
+                                Types.extractFromChildren children
 
                 ObjectNode ->
-                    layoutObject children
+                    case children of
+                        [ ListChild elements ] ->
+                            layoutObject elements
+
+                        _ ->
+                            layoutObjectError <|
+                                Types.extractFromChildren children
 
                 FieldNode ->
-                    layoutField children
+                    case children of
+                        [ Singleton field, Singleton value ] ->
+                            layoutField field value
+
+                        _ ->
+                            layoutFieldError <| Types.extractFromChildren children
     in
     viewPath hole bpath.up

@@ -108,17 +108,8 @@ viewChildren =
 
 
 viewLocation : Location Node -> Element BufferMsg
-viewLocation location =
-    let
-        hole =
-            case location.current of
-                Leaf s ->
-                    ViewUtils.viewFocusedLeaf s
-
-                Branch _ _ ->
-                    ViewUtils.viewHighlighted <| viewTerm location.current
-    in
-    viewPath hole location.path
+viewLocation =
+    ViewUtils.viewLocation viewTerm viewPath
 
 
 viewPath : Element msg -> Path Node -> Element msg

@@ -16,6 +16,7 @@ module ViewUtils exposing
     , viewFocusedLeaf
     , viewHighlighted
     , viewKeyword
+    , viewLocation
     , viewPunctuation
     )
 
@@ -51,6 +52,20 @@ body buffer clipBoard mainContent =
         [ Element.el [ Element.width <| Element.fillPortion 3 ] controls
         , Element.el [ Element.width <| Element.fillPortion 7 ] mainContent
         ]
+
+
+viewLocation : (Types.Term node -> Element BufferMsg) -> (Element BufferMsg -> Types.Path node -> Element BufferMsg) -> Types.Location node -> Element BufferMsg
+viewLocation viewTerm viewPath location =
+    let
+        hole =
+            case location.current of
+                Types.Leaf s ->
+                    viewFocusedLeaf s
+
+                Types.Branch _ _ ->
+                    viewHighlighted <| viewTerm location.current
+    in
+    viewPath hole location.path
 
 
 viewButton : String -> Maybe msg -> Element msg
