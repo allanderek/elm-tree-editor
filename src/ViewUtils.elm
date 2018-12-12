@@ -1,5 +1,6 @@
 module ViewUtils exposing
     ( body
+    , createViewPath
     , errorColor
     , header
     , indentElement
@@ -54,7 +55,15 @@ body buffer clipBoard mainContent =
         ]
 
 
-viewLocation : (Types.Term node -> Element BufferMsg) -> (Element BufferMsg -> Types.Path node -> Element BufferMsg) -> Types.Location node -> Element BufferMsg
+type alias ViewTerm node msg =
+    Types.Term node -> Element msg
+
+
+type alias ViewPath node msg =
+    Element msg -> Types.Path node -> Element msg
+
+
+viewLocation : ViewTerm node BufferMsg -> ViewPath node BufferMsg -> Types.Location node -> Element BufferMsg
 viewLocation viewTerm viewPath location =
     let
         hole =
@@ -66,6 +75,30 @@ viewLocation viewTerm viewPath location =
                     viewHighlighted <| viewTerm location.current
     in
     viewPath hole location.path
+
+
+type alias ViewBranchPath node msg =
+    Types.Child (Element msg) -> Types.BranchPath node -> Element msg
+
+
+createViewPath : ViewBranchPath node msg -> ViewTerm node msg -> ViewPath node msg
+createViewPath viewBranchPath viewTerm viewed path =
+    case path of
+        Types.Top ->
+            viewed
+
+        Types.SingleChildPath bpath ->
+            viewBranchPath (Types.Singleton viewed) bpath
+
+        Types.OptionalChildPath bpath ->
+            viewBranchPath (Types.OptionalChild viewed) bpath
+
+        Types.ListChildPath left bpath right ->
+            let
+                viewedList =
+                    Types.mapUpList viewTerm left viewed right
+            in
+            viewBranchPath (Types.ListChild viewedList) bpath
 
 
 viewButton : String -> Maybe msg -> Element msg

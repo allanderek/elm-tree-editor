@@ -221,23 +221,8 @@ viewLocation =
 
 
 viewPath : Element msg -> Path Node -> Element msg
-viewPath viewed path =
-    case path of
-        Top ->
-            viewed
-
-        SingleChildPath bpath ->
-            viewBranchPath (Singleton viewed) bpath
-
-        OptionalChildPath bpath ->
-            viewBranchPath (OptionalChild viewed) bpath
-
-        ListChildPath left bpath right ->
-            let
-                viewedList =
-                    Types.mapUpList viewTerm left viewed right
-            in
-            viewBranchPath (ListChild viewedList) bpath
+viewPath =
+    ViewUtils.createViewPath viewBranchPath viewTerm
 
 
 viewBranchPath : Types.Child (Element msg) -> Types.BranchPath Node -> Element msg
