@@ -10,6 +10,7 @@ import Element
 import ElmMode as Elm
 import Html.Attributes as Attributes
 import Json.Decode as Decode
+import Json.Decode.Pipeline as Pipeline
 import JsonMode as Json
 import List.Extra
 import Task
@@ -35,14 +36,26 @@ subscriptions =
     always keySubscription
 
 
+type alias KeyEvent =
+    { key : String
+    , ctrl : Bool
+    , alt : Bool
+    }
+
+
 keySubscription : Sub Msg
 keySubscription =
     let
         keyDecoder =
-            Decode.map KeyPressed <|
-                Decode.field "key" Decode.string
+            Decode.succeed KeyEvent
+                |> Pipeline.required "key" Decode.string
+                |> Pipeline.required "ctrlKey" Decode.bool
+                |> Pipeline.required "altKey" Decode.bool
+
+        decoder =
+            Decode.map KeyPressed keyDecoder
     in
-    Browser.Events.onKeyPress keyDecoder
+    Browser.Events.onKeyPress decoder
 
 
 type alias ProgramFlags =
@@ -52,13 +65,12 @@ type alias ProgramFlags =
 type alias Model =
     { key : Nav.Key
     , url : Url.Url
-    , elmBuffers : List (Types.Buffer Elm.Node)
-    , jsonBuffers : List (Types.Buffer Json.Node)
-    , currentBuffer : CurrentBuffer
+    , buffers : List BufferInMode
+    , currentBuffer : BufferInMode
     }
 
 
-type CurrentBuffer
+type BufferInMode
     = ElmBuffer (Types.Buffer Elm.Node)
     | JsonBuffer (Types.Buffer Json.Node)
 
@@ -67,8 +79,8 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
     | NoOp
-    | KeyPressed String
-    | SelectCurrentBuffer CurrentBuffer
+    | KeyPressed KeyEvent
+    | SelectCurrentBuffer BufferInMode
     | BufferMsg BufferMsg
 
 
@@ -104,8 +116,7 @@ init () url key =
         initialModel =
             { key = key
             , url = url
-            , elmBuffers = [ elmBuffer ]
-            , jsonBuffers = [ jsonBuffer ]
+            , buffers = [ ElmBuffer elmBuffer ]
             , currentBuffer = JsonBuffer jsonBuffer
             }
     in
@@ -138,24 +149,48 @@ update msg model =
         NoOp ->
             withCommands model []
 
-        KeyPressed keyCode ->
-            case model.currentBuffer of
-                ElmBuffer buffer ->
-                    let
-                        ( newBuffer, command ) =
-                            applyKey keyCode buffer
-                    in
-                    withCommands { model | currentBuffer = ElmBuffer newBuffer } [ command ]
+        KeyPressed event ->
+            case event.key == "w" && event.alt of
+                True ->
+                    case model.buffers of
+                        [] ->
+                            withCommands model []
 
-                JsonBuffer buffer ->
-                    let
-                        ( newBuffer, command ) =
-                            applyKey keyCode buffer
-                    in
-                    withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
+                        first :: rest ->
+                            let
+                                newModel =
+                                    { model
+                                        | currentBuffer = first
+                                        , buffers = rest ++ [ model.currentBuffer ]
+                                    }
+                            in
+                            withCommands newModel []
+
+                False ->
+                    case model.currentBuffer of
+                        ElmBuffer buffer ->
+                            let
+                                ( newBuffer, command ) =
+                                    applyKey event buffer
+                            in
+                            withCommands { model | currentBuffer = ElmBuffer newBuffer } [ command ]
+
+                        JsonBuffer buffer ->
+                            let
+                                ( newBuffer, command ) =
+                                    applyKey event buffer
+                            in
+                            withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
 
         SelectCurrentBuffer newCurrentBuffer ->
-            withCommands { model | currentBuffer = newCurrentBuffer } []
+            let
+                newModel =
+                    { model
+                        | currentBuffer = newCurrentBuffer
+                        , buffers = List.Extra.remove newCurrentBuffer model.buffers
+                    }
+            in
+            withCommands newModel []
 
         BufferMsg bufferMessage ->
             case model.currentBuffer of
@@ -206,9 +241,9 @@ updateBuffer message buffer =
             withCommands newBuffer []
 
 
-applyKey : String -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
-applyKey keyCode buffer =
-    case Dict.get keyCode buffer.keys of
+applyKey : KeyEvent -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
+applyKey event buffer =
+    case Dict.get event.key buffer.keys of
         Nothing ->
             withCommands buffer []
 
@@ -259,7 +294,7 @@ view model =
                 JsonBuffer buffer ->
                     Json.view buffer
 
-        makeBufferControl title newCurrentBuffer =
+        makeBufferControl newCurrentBuffer =
             let
                 msg =
                     case model.currentBuffer == newCurrentBuffer of
@@ -268,29 +303,21 @@ view model =
 
                         False ->
                             Just <| SelectCurrentBuffer newCurrentBuffer
+
+                title =
+                    case newCurrentBuffer of
+                        ElmBuffer _ ->
+                            "Elm"
+
+                        JsonBuffer _ ->
+                            "Json"
             in
             ViewUtils.viewButton title msg
-
-        makeElmButton elmBuffer =
-            makeBufferControl "Elm" <| ElmBuffer elmBuffer
-
-        elmBufferControls =
-            Element.row
-                []
-                (List.map makeElmButton model.elmBuffers)
-
-        makeJsonButton jsonBuffer =
-            makeBufferControl "Json" <| JsonBuffer jsonBuffer
-
-        jsonBufferControls =
-            Element.row
-                []
-                (List.map makeJsonButton model.jsonBuffers)
 
         bufferControls =
             Element.row
                 []
-                [ elmBufferControls, jsonBufferControls ]
+                (List.map makeBufferControl model.buffers)
 
         body =
             Element.column
