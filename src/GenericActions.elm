@@ -40,6 +40,8 @@ defaultActions =
             , goRight
             , goUp
             , goDown
+            , duplicateLeft
+            , duplicateRight
             ]
     in
     List.foldl addAction Dict.empty actions
@@ -280,6 +282,64 @@ goDown =
     in
     { actionId = "goDown"
     , name = "Down"
+    , updateState = updateState
+    , isAvailable = Types.defaultIsAvailable updateState
+    }
+
+
+duplicateLeft : Action node
+duplicateLeft =
+    let
+        updateLocation location =
+            case location.path of
+                Top ->
+                    location
+
+                SingleChildPath _ ->
+                    location
+
+                OptionalChildPath branchPath ->
+                    location
+
+                ListChildPath left branchPath right ->
+                    { location
+                        | path = ListChildPath left branchPath (location.current :: right)
+                    }
+
+        updateState =
+            Types.updateStateLocation updateLocation
+    in
+    { actionId = "duplicateLeft"
+    , name = "DupLeft"
+    , updateState = updateState
+    , isAvailable = Types.defaultIsAvailable updateState
+    }
+
+
+duplicateRight : Action node
+duplicateRight =
+    let
+        updateLocation location =
+            case location.path of
+                Top ->
+                    location
+
+                SingleChildPath _ ->
+                    location
+
+                OptionalChildPath branchPath ->
+                    location
+
+                ListChildPath left branchPath right ->
+                    { location
+                        | path = ListChildPath (location.current :: left) branchPath right
+                    }
+
+        updateState =
+            Types.updateStateLocation updateLocation
+    in
+    { actionId = "duplicateRight"
+    , name = "DupRight"
     , updateState = updateState
     , isAvailable = Types.defaultIsAvailable updateState
     }
