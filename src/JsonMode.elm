@@ -6,6 +6,7 @@ module JsonMode exposing
 
 import Browser
 import BufferMessage exposing (BufferMsg)
+import Dict
 import Element exposing (Element, text)
 import GenericActions
 import Types
@@ -27,13 +28,115 @@ type Node
 
 newBuffer : Location Node -> Buffer Node
 newBuffer location =
-    { state =
-        { location = location
-        , clipBoard = Nothing
-        }
-    , actions = GenericActions.defaultActions
-    , keys = GenericActions.defaultKeys
+    let
+        genericActionsBuffer =
+            { state =
+                { location = location
+                , clipBoard = Nothing
+                }
+            , actions = GenericActions.defaultActions
+            , keys = GenericActions.defaultKeys
+            }
+
+        addAction desc buffer =
+            { buffer
+                | actions = Dict.insert desc.action.actionId desc.action buffer.actions
+                , keys =
+                    case desc.key of
+                        Nothing ->
+                            buffer.keys
+
+                        Just k ->
+                            Dict.insert k desc.action.actionId buffer.keys
+            }
+    in
+    List.foldl addAction genericActionsBuffer jsonActions
+
+
+jsonActions : List { key : Maybe String, action : Types.Action Node }
+jsonActions =
+    [ { key = Just "l", action = upgradeToList }
+    , { key = Just "o", action = upgradeToObject }
+    ]
+
+
+upgradeExpression : (Term Node -> Term Node) -> Types.ActionId -> String -> Types.Action Node
+upgradeExpression upgradeFun actionId name =
+    let
+        updateLocation location =
+            let
+                newList =
+                    upgradeFun location.current
+
+                newLocation =
+                    { location | current = newList }
+            in
+            case location.path of
+                Top ->
+                    newLocation
+
+                SingleChildPath bpath ->
+                    case bpath.kind of
+                        FieldNode ->
+                            case List.isEmpty bpath.left of
+                                True ->
+                                    location
+
+                                False ->
+                                    newLocation
+
+                        ObjectNode ->
+                            -- Of course should not be possible
+                            location
+
+                        ListNode ->
+                            -- Of course should not be possible
+                            location
+
+                OptionalChildPath _ ->
+                    -- There are no optional child nodes in json.
+                    location
+
+                ListChildPath left bpath right ->
+                    case bpath.kind of
+                        FieldNode ->
+                            -- This should be impossible
+                            location
+
+                        ObjectNode ->
+                            -- You cannot upgrade a field definition
+                            location
+
+                        ListNode ->
+                            -- But you can upgrade an element in a list
+                            newLocation
+
+        updateState =
+            Types.updateStateLocation updateLocation
+    in
+    { actionId = actionId
+    , name = name
+    , updateState = updateState
+    , isAvailable = Types.defaultIsAvailable updateState
     }
+
+
+upgradeToList : Types.Action Node
+upgradeToList =
+    let
+        upgradeFun current =
+            Branch ListNode [ ListChild [ current ] ]
+    in
+    upgradeExpression upgradeFun "upgradeToList" "List"
+
+
+upgradeToObject : Types.Action Node
+upgradeToObject =
+    let
+        upgradeFun current =
+            Branch ObjectNode [ ListChild [ Branch FieldNode [ Singleton <| Leaf "_", Singleton current ] ] ]
+    in
+    upgradeExpression upgradeFun "upgradeToObject" "Object"
 
 
 view : Buffer Node -> { title : String, body : Element BufferMsg }
@@ -118,6 +221,14 @@ layoutList elements =
     case elements of
         [] ->
             ViewUtils.viewPunctuation "[]"
+
+        [ one ] ->
+            Element.row
+                [ ViewUtils.usualSpacing ]
+                [ ViewUtils.viewPunctuation "["
+                , one
+                , ViewUtils.viewPunctuation "]"
+                ]
 
         first :: rest ->
             -- Actually now that I think about it, this is very 'elmy' layout of list,
