@@ -27,6 +27,8 @@ defaultKeys =
         , ( "ArrowUp", "goUp" )
         , ( "ArrowDown", "goDown" )
         , ( "d", "delete" )
+        , ( "a", "duplicateLeft" )
+        , ( "s", "duplicateRight" )
         ]
 
 
