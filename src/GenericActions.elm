@@ -26,6 +26,7 @@ defaultKeys =
         , ( "ArrowRight", "goRight" )
         , ( "ArrowUp", "goUp" )
         , ( "ArrowDown", "goDown" )
+        , ( "d", "delete" )
         ]
 
 
@@ -42,6 +43,7 @@ defaultActions =
             , goDown
             , duplicateLeft
             , duplicateRight
+            , delete
             ]
     in
     List.foldl addAction Dict.empty actions
@@ -199,18 +201,19 @@ goRight =
     }
 
 
+branchPathUp : Types.BranchPath node -> Child (Term node) -> Types.Location node
+branchPathUp branchPath current =
+    { path = branchPath.up
+    , current =
+        Branch branchPath.kind <|
+            Types.upList branchPath.left current branchPath.right
+    }
+
+
 goUp : Action node
 goUp =
     let
         updateLocation location =
-            let
-                branchPathUp branchPath current =
-                    { path = branchPath.up
-                    , current =
-                        Branch branchPath.kind <|
-                            Types.upList branchPath.left current branchPath.right
-                    }
-            in
             case location.path of
                 Top ->
                     location
@@ -340,6 +343,44 @@ duplicateRight =
     in
     { actionId = "duplicateRight"
     , name = "DupRight"
+    , updateState = updateState
+    , isAvailable = Types.defaultIsAvailable updateState
+    }
+
+
+delete : Action node
+delete =
+    let
+        updateLocation location =
+            case location.path of
+                Top ->
+                    location
+
+                SingleChildPath _ ->
+                    location
+
+                OptionalChildPath branchPath ->
+                    -- TODO: You *can* delete an optional child, but you need to 'goUp'
+                    location
+
+                ListChildPath [] branchPath [] ->
+                    branchPathUp branchPath <| ListChild []
+
+                ListChildPath (l :: left) branchPath right ->
+                    { current = l
+                    , path = ListChildPath left branchPath right
+                    }
+
+                ListChildPath [] branchPath (r :: right) ->
+                    { current = r
+                    , path = ListChildPath [] branchPath right
+                    }
+
+        updateState =
+            Types.updateStateLocation updateLocation
+    in
+    { actionId = "delete"
+    , name = "Del"
     , updateState = updateState
     , isAvailable = Types.defaultIsAvailable updateState
     }
