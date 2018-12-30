@@ -1,8 +1,6 @@
 module BufferMessage exposing (BufferMsg(..))
 
-import Browser
 import Types
-import Url
 
 
 type BufferMsg

@@ -4,7 +4,6 @@ module JsonMode exposing
     , view
     )
 
-import Browser
 import BufferMessage exposing (BufferMsg)
 import Dict
 import Element exposing (Element, text)
@@ -97,7 +96,7 @@ upgradeExpression upgradeFun actionId name =
                     -- There are no optional child nodes in json.
                     location
 
-                ListChildPath left bpath right ->
+                ListChildPath _ bpath _ ->
                     case bpath.kind of
                         FieldNode ->
                             -- This should be impossible

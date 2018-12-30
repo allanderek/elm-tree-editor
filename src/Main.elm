@@ -5,10 +5,9 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
 import BufferMessage exposing (BufferMsg)
-import Dict exposing (Dict)
+import Dict
 import Element
 import ElmMode as Elm
-import Html.Attributes as Attributes
 import Json.Decode as Decode
 import Json.Decode.Pipeline as Pipeline
 import JsonMode as Json

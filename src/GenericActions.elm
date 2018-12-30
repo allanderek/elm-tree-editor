@@ -251,7 +251,7 @@ goDown =
                 Leaf _ ->
                     location
 
-                Branch kind [] ->
+                Branch _ [] ->
                     location
 
                 Branch kind (firstChild :: others) ->
@@ -303,7 +303,7 @@ duplicateLeft =
                 SingleChildPath _ ->
                     location
 
-                OptionalChildPath branchPath ->
+                OptionalChildPath _ ->
                     location
 
                 ListChildPath left branchPath right ->
@@ -332,7 +332,7 @@ duplicateRight =
                 SingleChildPath _ ->
                     location
 
-                OptionalChildPath branchPath ->
+                OptionalChildPath _ ->
                     location
 
                 ListChildPath left branchPath right ->
@@ -361,7 +361,7 @@ delete =
                 SingleChildPath _ ->
                     location
 
-                OptionalChildPath branchPath ->
+                OptionalChildPath _ ->
                     -- TODO: You *can* delete an optional child, but you need to 'goUp'
                     location
 
