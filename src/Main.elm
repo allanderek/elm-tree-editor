@@ -119,7 +119,7 @@ init () url key =
             , currentBuffer = JsonBuffer jsonBuffer
             }
     in
-    withCommands initialModel []
+    noCommand initialModel
 
 
 focusLeafBox : Cmd Msg
@@ -143,10 +143,10 @@ update msg model =
             ( model, command )
 
         UrlChanged url ->
-            withCommands { model | url = url } []
+            noCommand { model | url = url }
 
         NoOp ->
-            withCommands model []
+            noCommand model
 
         KeyPressed event ->
             case event.key == "w" && event.alt of
@@ -163,7 +163,7 @@ update msg model =
                                         , buffers = rest ++ [ model.currentBuffer ]
                                     }
                             in
-                            withCommands newModel []
+                            noCommand newModel
 
                 False ->
                     case model.currentBuffer of
@@ -192,7 +192,7 @@ update msg model =
                         , buffers = newBuffers
                     }
             in
-            withCommands newModel []
+            noCommand newModel
 
         BufferMsg bufferMessage ->
             case model.currentBuffer of
@@ -240,14 +240,14 @@ updateBuffer message buffer =
                         Types.Branch _ _ ->
                             buffer
             in
-            withCommands newBuffer []
+            noCommand newBuffer
 
 
 applyKey : KeyEvent -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
 applyKey event buffer =
     case Dict.get event.key buffer.keys of
         Nothing ->
-            withCommands buffer []
+            noCommand buffer
 
         Just actionId ->
             applyAction actionId buffer
@@ -257,7 +257,7 @@ applyAction : Types.ActionId -> Types.Buffer node -> ( Types.Buffer node, Cmd Ms
 applyAction actionId buffer =
     case Dict.get actionId buffer.actions of
         Nothing ->
-            withCommands buffer []
+            noCommand buffer
 
         Just action ->
             let
@@ -283,6 +283,11 @@ applyAction actionId buffer =
 withCommands : model -> List (Cmd msg) -> ( model, Cmd msg )
 withCommands model commands =
     ( model, Cmd.batch commands )
+
+
+noCommand : model -> ( model, Cmd msg )
+noCommand model =
+    ( model, Cmd.none )
 
 
 view : Model -> Browser.Document Msg
