@@ -183,10 +183,13 @@ update msg model =
 
         SelectCurrentBuffer newCurrentBuffer ->
             let
+                newBuffers =
+                    model.currentBuffer :: List.Extra.remove newCurrentBuffer model.buffers
+
                 newModel =
                     { model
                         | currentBuffer = newCurrentBuffer
-                        , buffers = List.Extra.remove newCurrentBuffer model.buffers
+                        , buffers = newBuffers
                     }
             in
             withCommands newModel []
