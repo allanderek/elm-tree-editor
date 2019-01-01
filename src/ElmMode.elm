@@ -33,6 +33,7 @@ newBuffer location =
         }
     , actions = GenericActions.defaultActions
     , keys = GenericActions.defaultKeys
+    , leafKeys = GenericActions.defaultLeafKeys
     }
 
 

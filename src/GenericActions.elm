@@ -1,6 +1,7 @@
 module GenericActions exposing
     ( defaultActions
     , defaultKeys
+    , defaultLeafKeys
     , goDown
     , goLeft
     , goRight
@@ -21,14 +22,38 @@ import Types
 
 defaultKeys : Dict String ActionId
 defaultKeys =
+    let
+        extra =
+            Dict.fromList
+                [ ( "h", "goLeft" )
+                , ( "l", "goRight" )
+                , ( "j", "goUp" )
+                , ( "k", "goDown" )
+                , ( "d", "delete" )
+                , ( "a", "duplicateLeft" )
+                , ( "s", "duplicateRight" )
+                ]
+    in
+    Dict.union extra commonKeys
+
+
+defaultLeafKeys : Dict String ActionId
+defaultLeafKeys =
+    let
+        extra =
+            Dict.fromList
+                []
+    in
+    Dict.union extra commonKeys
+
+
+commonKeys : Dict String ActionId
+commonKeys =
     Dict.fromList
         [ ( "ArrowLeft", "goLeft" )
         , ( "ArrowRight", "goRight" )
         , ( "ArrowUp", "goUp" )
         , ( "ArrowDown", "goDown" )
-        , ( "d", "delete" )
-        , ( "a", "duplicateLeft" )
-        , ( "s", "duplicateRight" )
         ]
 
 

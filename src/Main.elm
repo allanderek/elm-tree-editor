@@ -149,23 +149,11 @@ update msg model =
             noCommand model
 
         KeyPressed event ->
-            case event.key == "w" && event.alt of
-                True ->
-                    case model.buffers of
-                        [] ->
-                            withCommands model []
+            case globalEvent event model of
+                Just result ->
+                    result
 
-                        first :: rest ->
-                            let
-                                newModel =
-                                    { model
-                                        | currentBuffer = first
-                                        , buffers = rest ++ [ model.currentBuffer ]
-                                    }
-                            in
-                            noCommand newModel
-
-                False ->
+                Nothing ->
                     case model.currentBuffer of
                         ElmBuffer buffer ->
                             let
@@ -211,6 +199,28 @@ update msg model =
                     withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
 
 
+globalEvent : KeyEvent -> Model -> Maybe ( Model, Cmd Msg )
+globalEvent event model =
+    case event.key == "w" && event.alt of
+        True ->
+            case model.buffers of
+                [] ->
+                    Just <| noCommand model
+
+                first :: rest ->
+                    let
+                        newModel =
+                            { model
+                                | currentBuffer = first
+                                , buffers = rest ++ [ model.currentBuffer ]
+                            }
+                    in
+                    Just <| noCommand newModel
+
+        False ->
+            Nothing
+
+
 updateBuffer : BufferMsg -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
 updateBuffer message buffer =
     case message of
@@ -245,7 +255,16 @@ updateBuffer message buffer =
 
 applyKey : KeyEvent -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
 applyKey event buffer =
-    case Dict.get event.key buffer.keys of
+    let
+        keysMapping =
+            case buffer.state.location.current of
+                Types.Leaf _ ->
+                    buffer.leafKeys
+
+                Types.Branch _ _ ->
+                    buffer.keys
+    in
+    case Dict.get event.key keysMapping of
         Nothing ->
             noCommand buffer
 

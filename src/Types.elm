@@ -45,6 +45,10 @@ type alias Buffer node =
     -- Alternatively we could have a function from EditorState node -> List (Action node).
     , actions : Dict ActionId (Action node)
     , keys : Dict String ActionId
+
+    -- The keys which are active when a leaf input is in focus, for example you may have bound the 'hjkl'
+    -- keys to the left,up,down,right actions, but you don't want them taking effect whilst in a leaf input.
+    , leafKeys : Dict String ActionId
     }
 
 
