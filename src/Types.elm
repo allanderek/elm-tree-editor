@@ -6,12 +6,17 @@ module Types exposing
     , Child(..)
     , EditorState
     , Fragment
+    , KeyEvent
+    , KeyMapping
+    , KeyMappings
     , Location
     , Path(..)
     , Term(..)
+    , addAction
     , defaultIsAvailable
     , extractFromChild
     , extractFromChildren
+    , keyEventDecoder
     , mapChild
     , mapUpList
     , upList
@@ -19,6 +24,8 @@ module Types exposing
     )
 
 import Dict exposing (Dict)
+import Json.Decode as Decode
+import Json.Decode.Pipeline as Pipeline
 
 
 
@@ -38,17 +45,72 @@ mapUpList fun left hole right =
     upList (List.map fun left) hole (List.map fun right)
 
 
+type alias KeyMapping =
+    Dict String ActionId
+
+
+type alias KeyMappings =
+    { bare : KeyMapping
+    , ctrl : KeyMapping
+    , alt : KeyMapping
+    }
+
+
+type alias KeyEvent =
+    { key : String
+    , ctrl : Bool
+    , alt : Bool
+    }
+
+
+keyEventDecoder : Decode.Decoder KeyEvent
+keyEventDecoder =
+    Decode.succeed KeyEvent
+        |> Pipeline.required "key" Decode.string
+        |> Pipeline.required "ctrlKey" Decode.bool
+        |> Pipeline.required "altKey" Decode.bool
+
+
+addKeyBinding : KeyEvent -> ActionId -> KeyMappings -> KeyMappings
+addKeyBinding keyEvent actionId mappings =
+    case keyEvent.ctrl of
+        True ->
+            { mappings | ctrl = Dict.insert keyEvent.key actionId mappings.ctrl }
+
+        False ->
+            case keyEvent.alt of
+                True ->
+                    { mappings | alt = Dict.insert keyEvent.key actionId mappings.alt }
+
+                False ->
+                    { mappings | bare = Dict.insert keyEvent.key actionId mappings.bare }
+
+
 type alias Buffer node =
     { state : EditorState node
 
     -- This means you just have a set list of actions and they each have an 'isAvailable' function.
     -- Alternatively we could have a function from EditorState node -> List (Action node).
     , actions : Dict ActionId (Action node)
-    , keys : Dict String ActionId
+    , keys : KeyMappings
 
     -- The keys which are active when a leaf input is in focus, for example you may have bound the 'hjkl'
     -- keys to the left,up,down,right actions, but you don't want them taking effect whilst in a leaf input.
-    , leafKeys : Dict String ActionId
+    , leafKeys : KeyMappings
+    }
+
+
+addAction : { key : Maybe KeyEvent, action : Action node } -> Buffer node -> Buffer node
+addAction desc buffer =
+    { buffer
+        | actions = Dict.insert desc.action.actionId desc.action buffer.actions
+        , keys =
+            case desc.key of
+                Nothing ->
+                    buffer.keys
+
+                Just keyEvent ->
+                    addKeyBinding keyEvent desc.action.actionId buffer.keys
     }
 
 

@@ -28,35 +28,20 @@ type Node
 newBuffer : Location Node -> Buffer Node
 newBuffer location =
     let
-        genericActionsBuffer =
-            { state =
-                { location = location
-                , clipBoard = Nothing
-                }
-            , actions = GenericActions.defaultActions
-            , keys = GenericActions.defaultKeys
-            , leafKeys = GenericActions.defaultLeafKeys
-            }
-
-        addAction desc buffer =
-            { buffer
-                | actions = Dict.insert desc.action.actionId desc.action buffer.actions
-                , keys =
-                    case desc.key of
-                        Nothing ->
-                            buffer.keys
-
-                        Just k ->
-                            Dict.insert k desc.action.actionId buffer.keys
-            }
+        buffer =
+            GenericActions.genericActionsBuffer location
     in
-    List.foldl addAction genericActionsBuffer jsonActions
+    List.foldl Types.addAction buffer jsonActions
 
 
-jsonActions : List { key : Maybe String, action : Types.Action Node }
+jsonActions : List { key : Maybe Types.KeyEvent, action : Types.Action Node }
 jsonActions =
-    [ { key = Just "l", action = upgradeToList }
-    , { key = Just "o", action = upgradeToObject }
+    let
+        bareKey k =
+            Just { key = k, alt = False, ctrl = False }
+    in
+    [ { key = bareKey "p", action = upgradeToList }
+    , { key = bareKey "o", action = upgradeToObject }
     ]
 
 

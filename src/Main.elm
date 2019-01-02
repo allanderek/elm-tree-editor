@@ -35,24 +35,11 @@ subscriptions =
     always keySubscription
 
 
-type alias KeyEvent =
-    { key : String
-    , ctrl : Bool
-    , alt : Bool
-    }
-
-
 keySubscription : Sub Msg
 keySubscription =
     let
-        keyDecoder =
-            Decode.succeed KeyEvent
-                |> Pipeline.required "key" Decode.string
-                |> Pipeline.required "ctrlKey" Decode.bool
-                |> Pipeline.required "altKey" Decode.bool
-
         decoder =
-            Decode.map KeyPressed keyDecoder
+            Decode.map KeyPressed Types.keyEventDecoder
     in
     Browser.Events.onKeyPress decoder
 
@@ -78,7 +65,7 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
     | NoOp
-    | KeyPressed KeyEvent
+    | KeyPressed Types.KeyEvent
     | SelectCurrentBuffer BufferInMode
     | BufferMsg BufferMsg
 
@@ -199,7 +186,7 @@ update msg model =
                     withCommands { model | currentBuffer = JsonBuffer newBuffer } [ command ]
 
 
-globalEvent : KeyEvent -> Model -> Maybe ( Model, Cmd Msg )
+globalEvent : Types.KeyEvent -> Model -> Maybe ( Model, Cmd Msg )
 globalEvent event model =
     case event.key == "w" && event.alt of
         True ->
@@ -253,16 +240,29 @@ updateBuffer message buffer =
             noCommand newBuffer
 
 
-applyKey : KeyEvent -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
+applyKey : Types.KeyEvent -> Types.Buffer node -> ( Types.Buffer node, Cmd Msg )
 applyKey event buffer =
     let
-        keysMapping =
+        keysMappings =
             case buffer.state.location.current of
                 Types.Leaf _ ->
                     buffer.leafKeys
 
                 Types.Branch _ _ ->
                     buffer.keys
+
+        keysMapping =
+            case event.ctrl of
+                True ->
+                    keysMappings.ctrl
+
+                False ->
+                    case event.alt of
+                        True ->
+                            keysMappings.alt
+
+                        False ->
+                            keysMappings.bare
     in
     case Dict.get event.key keysMapping of
         Nothing ->

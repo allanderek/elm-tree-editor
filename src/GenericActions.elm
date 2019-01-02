@@ -2,6 +2,7 @@ module GenericActions exposing
     ( defaultActions
     , defaultKeys
     , defaultLeafKeys
+    , genericActionsBuffer
     , goDown
     , goLeft
     , goRight
@@ -20,10 +21,30 @@ import Types
         )
 
 
-defaultKeys : Dict String ActionId
+genericActionsBuffer : Types.Location node -> Types.Buffer node
+genericActionsBuffer location =
+    { state =
+        { location = location
+        , clipBoard = Nothing
+        }
+    , actions = defaultActions
+    , keys = defaultKeys
+    , leafKeys = defaultLeafKeys
+    }
+
+
+defaultKeys : Types.KeyMappings
 defaultKeys =
+    { ctrl = Dict.empty
+    , alt = Dict.empty
+    , bare = Dict.union defaultLeafKeys.bare defaultLeafKeys.ctrl
+    }
+
+
+defaultLeafKeys : Types.KeyMappings
+defaultLeafKeys =
     let
-        extra =
+        ctrl =
             Dict.fromList
                 [ ( "h", "goLeft" )
                 , ( "l", "goRight" )
@@ -34,20 +55,13 @@ defaultKeys =
                 , ( "s", "duplicateRight" )
                 ]
     in
-    Dict.union extra commonKeys
+    { bare = commonKeys
+    , ctrl = ctrl
+    , alt = Dict.empty
+    }
 
 
-defaultLeafKeys : Dict String ActionId
-defaultLeafKeys =
-    let
-        extra =
-            Dict.fromList
-                []
-    in
-    Dict.union extra commonKeys
-
-
-commonKeys : Dict String ActionId
+commonKeys : Types.KeyMapping
 commonKeys =
     Dict.fromList
         [ ( "ArrowLeft", "goLeft" )
